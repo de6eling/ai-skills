@@ -1,110 +1,137 @@
 #!/usr/bin/env python3
 """
-Identify the project ecosystem, language, and tooling from config files.
+Gather ecosystem signals from a repository.
 
-Takes config file list (from scan-structure) or scans the root directly.
-Covers web and non-web ecosystems.
+This script COLLECTS FACTS, it does not make decisions. It reports:
+- All config files found and what ecosystems they suggest
+- All dependencies found and what libraries they indicate
+- File extension counts (how many .ts, .tsx, .rs, .dart, etc.)
+- TypeScript presence, monorepo signals, styling systems
+
+The SKILL.md or prompt handler uses these facts to determine the
+primary ecosystem. This avoids hardcoded priority logic that breaks
+in polyglot monorepos.
 
 Usage:
-  python3 identify-ecosystem.py [--root <path>] [--configs '["package.json","svelte.config.js"]']
+  python3 identify-ecosystem.py [--root <path>]
 """
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
+from collections import Counter
 
 sys.path.insert(0, str(Path(__file__).parent))
-from utils import should_skip
+from utils import SKIP_DIRS
 
-# Config file → ecosystem hypothesis
-# Ordered by specificity (meta-frameworks first, then base frameworks)
-ECOSYSTEM_SIGNALS = [
-    # JS/TS Meta-frameworks
-    ("next.config.js",      "nextjs",     "Next.js",     "typescript", [".tsx", ".jsx"], [".css", ".scss", ".ts", ".json"]),
-    ("next.config.mjs",     "nextjs",     "Next.js",     "typescript", [".tsx", ".jsx"], [".css", ".scss", ".ts", ".json"]),
-    ("next.config.ts",      "nextjs",     "Next.js",     "typescript", [".tsx", ".jsx"], [".css", ".scss", ".ts", ".json"]),
-    ("nuxt.config.ts",      "nuxt",       "Nuxt",        "typescript", [".vue"],         [".css", ".scss", ".ts", ".json"]),
-    ("nuxt.config.js",      "nuxt",       "Nuxt",        "javascript", [".vue"],         [".css", ".scss", ".js", ".json"]),
-    ("svelte.config.js",    "sveltekit",  "SvelteKit",   "typescript", [".svelte"],      [".css", ".scss", ".ts", ".json"]),
-    ("svelte.config.ts",    "sveltekit",  "SvelteKit",   "typescript", [".svelte"],      [".css", ".scss", ".ts", ".json"]),
-    ("astro.config.mjs",    "astro",      "Astro",       "typescript", [".astro", ".tsx", ".jsx", ".svelte", ".vue"], [".css", ".scss", ".ts", ".json"]),
-    ("astro.config.ts",     "astro",      "Astro",       "typescript", [".astro", ".tsx", ".jsx"], [".css", ".scss", ".ts", ".json"]),
-    ("angular.json",        "angular",    "Angular",     "typescript", [".ts"],          [".css", ".scss", ".ts", ".json"]),
-    (".angular.json",       "angular",    "Angular",     "typescript", [".ts"],          [".css", ".scss", ".ts", ".json"]),
-    ("remix.config.js",     "remix",      "Remix",       "typescript", [".tsx", ".jsx"], [".css", ".scss", ".ts", ".json"]),
-    ("gatsby-config.js",    "gatsby",     "Gatsby",      "javascript", [".tsx", ".jsx"], [".css", ".scss", ".ts", ".json"]),
-    ("gatsby-config.ts",    "gatsby",     "Gatsby",      "typescript", [".tsx", ".jsx"], [".css", ".scss", ".ts", ".json"]),
-    ("ember-cli-build.js",  "ember",      "Ember",       "javascript", [".hbs", ".js", ".ts"], [".css", ".scss", ".js"]),
-    ("vite.config.ts",      "vite",       "Vite",        "typescript", [".tsx", ".jsx", ".vue", ".svelte"], [".css", ".scss", ".ts", ".json"]),
-    ("vite.config.js",      "vite",       "Vite",        "javascript", [".tsx", ".jsx", ".vue", ".svelte"], [".css", ".scss", ".js", ".json"]),
-    ("vite.config.mjs",     "vite",       "Vite",        "javascript", [".tsx", ".jsx", ".vue", ".svelte"], [".css", ".scss", ".js", ".json"]),
-
-    # Non-web ecosystems
-    ("pubspec.yaml",        "flutter",    "Flutter",     "dart",       [".dart"],        [".dart", ".yaml", ".json"]),
-    ("Package.swift",       "swiftui",    "Swift/SwiftUI", "swift",   [".swift"],       [".swift", ".xcassets"]),
-    ("Podfile",             "ios",        "iOS",         "swift",      [".swift", ".m"], [".swift", ".plist"]),
-
-    # Python web
-    ("manage.py",           "django",     "Django",      "python",     [".html", ".py"], [".css", ".scss", ".py", ".json"]),
-
-    # Ruby
-    ("Gemfile",             "rails",      "Ruby on Rails", "ruby",    [".erb", ".haml"], [".css", ".scss", ".rb"]),
-
-    # PHP
-    ("artisan",             "laravel",    "Laravel",     "php",        [".blade.php", ".vue"], [".css", ".scss", ".php"]),
-
-    # Elixir
-    ("mix.exs",             "phoenix",    "Phoenix",     "elixir",     [".heex", ".ex"], [".css", ".ex"]),
-
-    # Rust web (Leptos, Yew, Dioxus)
-    ("Cargo.toml",          "rust",       "Rust",        "rust",       [".rs"],          [".rs", ".css", ".json"]),
-
-    # Go
-    ("go.mod",              "go",         "Go",          "go",         [".go", ".templ"], [".css", ".go"]),
-]
-
-# Package dependency → (ecosystem_refinement, library_name)
-DEPENDENCY_SIGNALS = {
-    # JS/TS base frameworks (for Vite detection refinement)
-    "react":            ("react",    "React"),
-    "react-dom":        ("react",    "React"),
-    "vue":              ("vue",      "Vue"),
-    "svelte":           ("svelte",   "Svelte"),
-    "solid-js":         ("solid",    "SolidJS"),
-    "preact":           ("preact",   "Preact"),
-    "@angular/core":    ("angular",  "Angular"),
-    "lit":              ("lit",      "Lit"),
-    # Component libraries
-    "primeng":          (None, "PrimeNG"),
-    "primevue":         (None, "PrimeVue"),
-    "primereact":       (None, "PrimeReact"),
-    "@radix-ui/react-slot": (None, "Radix UI"),
-    "@radix-ui/react-dialog": (None, "Radix UI"),
-    "@headlessui/react": (None, "Headless UI"),
-    "@headlessui/vue":  (None, "Headless UI"),
-    "@chakra-ui/react": (None, "Chakra UI"),
-    "@mantine/core":    (None, "Mantine"),
-    "@mui/material":    (None, "Material UI"),
-    "antd":             (None, "Ant Design"),
-    "vuetify":          (None, "Vuetify"),
-    "daisyui":          (None, "DaisyUI"),
-    "flowbite":         (None, "Flowbite"),
-    "@angular/material": (None, "Angular Material"),
-    "element-plus":     (None, "Element Plus"),
+# Config file → what it suggests (can suggest multiple things)
+CONFIG_SIGNALS = {
+    # JS/TS meta-frameworks
+    "next.config.js":      {"ecosystem": "nextjs",    "name": "Next.js",     "lang": "typescript"},
+    "next.config.mjs":     {"ecosystem": "nextjs",    "name": "Next.js",     "lang": "typescript"},
+    "next.config.ts":      {"ecosystem": "nextjs",    "name": "Next.js",     "lang": "typescript"},
+    "nuxt.config.ts":      {"ecosystem": "nuxt",      "name": "Nuxt",        "lang": "typescript"},
+    "nuxt.config.js":      {"ecosystem": "nuxt",      "name": "Nuxt",        "lang": "javascript"},
+    "svelte.config.js":    {"ecosystem": "sveltekit",  "name": "SvelteKit",  "lang": "typescript"},
+    "svelte.config.ts":    {"ecosystem": "sveltekit",  "name": "SvelteKit",  "lang": "typescript"},
+    "astro.config.mjs":    {"ecosystem": "astro",     "name": "Astro",       "lang": "typescript"},
+    "astro.config.ts":     {"ecosystem": "astro",     "name": "Astro",       "lang": "typescript"},
+    "angular.json":        {"ecosystem": "angular",   "name": "Angular",     "lang": "typescript"},
+    ".angular.json":       {"ecosystem": "angular",   "name": "Angular",     "lang": "typescript"},
+    "remix.config.js":     {"ecosystem": "remix",     "name": "Remix",       "lang": "typescript"},
+    "gatsby-config.js":    {"ecosystem": "gatsby",    "name": "Gatsby",      "lang": "javascript"},
+    "gatsby-config.ts":    {"ecosystem": "gatsby",    "name": "Gatsby",      "lang": "typescript"},
+    "ember-cli-build.js":  {"ecosystem": "ember",     "name": "Ember",       "lang": "javascript"},
+    "vite.config.ts":      {"ecosystem": "vite",      "name": "Vite",        "lang": "typescript"},
+    "vite.config.js":      {"ecosystem": "vite",      "name": "Vite",        "lang": "javascript"},
+    "vite.config.mjs":     {"ecosystem": "vite",      "name": "Vite",        "lang": "javascript"},
     # Styling
-    "tailwindcss":      (None, "Tailwind CSS"),
-    "styled-components": (None, "styled-components"),
-    "@emotion/react":   (None, "Emotion"),
-    "sass":             (None, "Sass/SCSS"),
+    "tailwind.config.js":  {"styling": "Tailwind CSS"},
+    "tailwind.config.ts":  {"styling": "Tailwind CSS"},
+    "tailwind.config.mjs": {"styling": "Tailwind CSS"},
+    "postcss.config.js":   {"styling": "PostCSS"},
+    "postcss.config.mjs":  {"styling": "PostCSS"},
+    # Component library configs
+    "components.json":     {"library": "shadcn/ui (possible)"},
+    # Non-web ecosystems
+    "pubspec.yaml":        {"ecosystem": "flutter",   "name": "Flutter",     "lang": "dart"},
+    "Package.swift":       {"ecosystem": "swiftui",   "name": "Swift/SwiftUI", "lang": "swift"},
+    "Podfile":             {"ecosystem": "ios",       "name": "iOS",         "lang": "swift"},
+    "Cargo.toml":          {"ecosystem": "rust",      "name": "Rust",        "lang": "rust"},
+    "go.mod":              {"ecosystem": "go",        "name": "Go",          "lang": "go"},
+    "mix.exs":             {"ecosystem": "phoenix",   "name": "Phoenix",     "lang": "elixir"},
+    "manage.py":           {"ecosystem": "django",    "name": "Django",      "lang": "python"},
+    "artisan":             {"ecosystem": "laravel",   "name": "Laravel",     "lang": "php"},
+    "Gemfile":             {"ecosystem": "rails",     "name": "Ruby",        "lang": "ruby"},
+    # Package managers / signals
+    "package.json":        {"signal": "Node.js/JavaScript ecosystem present"},
+    "yarn.lock":           {"signal": "Yarn package manager"},
+    "pnpm-lock.yaml":      {"signal": "pnpm package manager"},
+    "package-lock.json":   {"signal": "npm package manager"},
+    "bun.lockb":           {"signal": "Bun runtime"},
+    "bun.lock":            {"signal": "Bun runtime"},
+    "tsconfig.json":       {"signal": "TypeScript configured"},
+    # Monorepo
+    "pnpm-workspace.yaml": {"monorepo": "pnpm workspaces"},
+    "lerna.json":          {"monorepo": "Lerna"},
+    "nx.json":             {"monorepo": "Nx"},
+    "turbo.json":          {"monorepo": "Turborepo"},
+    "rush.json":           {"monorepo": "Rush"},
 }
 
-# Flutter dependency signals (pubspec.yaml)
-FLUTTER_DEPENDENCY_SIGNALS = {
-    "flutter":          (None, "Flutter SDK"),
-    "cupertino_icons":  (None, "Cupertino Icons"),
-    "material_design_icons_flutter": (None, "Material Icons"),
+# Package.json dependency → what it indicates
+DEPENDENCY_SIGNALS = {
+    # Frameworks
+    "react":            {"framework": "React"},
+    "react-dom":        {"framework": "React"},
+    "vue":              {"framework": "Vue"},
+    "svelte":           {"framework": "Svelte"},
+    "solid-js":         {"framework": "SolidJS"},
+    "preact":           {"framework": "Preact"},
+    "@angular/core":    {"framework": "Angular"},
+    "lit":              {"framework": "Lit"},
+    # Component libraries
+    "primeng":          {"library": "PrimeNG"},
+    "primevue":         {"library": "PrimeVue"},
+    "primereact":       {"library": "PrimeReact"},
+    "@radix-ui/react-slot": {"library": "Radix UI"},
+    "@radix-ui/react-dialog": {"library": "Radix UI"},
+    "@headlessui/react": {"library": "Headless UI"},
+    "@headlessui/vue":  {"library": "Headless UI"},
+    "@chakra-ui/react": {"library": "Chakra UI"},
+    "@mantine/core":    {"library": "Mantine"},
+    "@mui/material":    {"library": "Material UI"},
+    "antd":             {"library": "Ant Design"},
+    "vuetify":          {"library": "Vuetify"},
+    "daisyui":          {"library": "DaisyUI"},
+    "flowbite":         {"library": "Flowbite"},
+    "@angular/material": {"library": "Angular Material"},
+    "element-plus":     {"library": "Element Plus"},
+    # Styling
+    "tailwindcss":      {"styling": "Tailwind CSS"},
+    "styled-components": {"styling": "styled-components"},
+    "@emotion/react":   {"styling": "Emotion"},
+    "sass":             {"styling": "Sass/SCSS"},
 }
+
+
+def count_extensions(root: Path, max_depth: int = 3) -> dict:
+    """Count files by extension (quick scan, limited depth)."""
+    counts = Counter()
+    for dirpath_str, dirnames, filenames in root.walk():
+        dirpath = Path(dirpath_str)
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS and not d.startswith(".")]
+        depth = len(dirpath.relative_to(root).parts)
+        if depth > max_depth:
+            dirnames.clear()
+            continue
+        for f in filenames:
+            ext = Path(f).suffix.lower()
+            if ext:
+                counts[ext] += 1
+    return dict(counts.most_common(20))
 
 
 def read_package_deps(root: Path) -> dict:
@@ -114,39 +141,19 @@ def read_package_deps(root: Path) -> dict:
         return {}
     try:
         pkg = json.loads(pkg_path.read_text())
-        return {**pkg.get("dependencies", {}), **pkg.get("devDependencies", {})}
+        deps = {}
+        for key in ("dependencies", "devDependencies"):
+            deps.update(pkg.get(key, {}))
+        # Also check for workspaces
+        if "workspaces" in pkg:
+            deps["__has_workspaces__"] = True
+        return deps
     except (json.JSONDecodeError, KeyError):
         return {}
 
 
-def read_pubspec_deps(root: Path) -> dict:
-    """Read dependencies from pubspec.yaml (basic YAML parsing without pyyaml)."""
-    pubspec_path = root / "pubspec.yaml"
-    if not pubspec_path.exists():
-        return {}
-    try:
-        content = pubspec_path.read_text()
-        deps = {}
-        in_deps = False
-        for line in content.splitlines():
-            stripped = line.strip()
-            if stripped in ("dependencies:", "dev_dependencies:"):
-                in_deps = True
-                continue
-            if in_deps and line and not line[0].isspace():
-                in_deps = False
-                continue
-            if in_deps and ":" in stripped:
-                name = stripped.split(":")[0].strip()
-                if name and not name.startswith("#"):
-                    deps[name] = True
-        return deps
-    except OSError:
-        return {}
-
-
 def check_shadcn(root: Path) -> dict | None:
-    """Check for shadcn/ui config (components.json)."""
+    """Check for shadcn/ui config."""
     cj_path = root / "components.json"
     if not cj_path.exists():
         return None
@@ -162,130 +169,107 @@ def check_shadcn(root: Path) -> dict | None:
     return None
 
 
-def check_android(root: Path) -> bool:
-    """Check if a Gradle project is Android (not just any JVM project)."""
-    for gradle_file in ["build.gradle", "build.gradle.kts"]:
-        path = root / gradle_file
-        if path.exists():
-            try:
-                content = path.read_text()[:2000]
-                if "android" in content.lower() or "com.android" in content:
-                    return True
-            except OSError:
-                pass
-    return False
-
-
-def identify(root: Path, config_files: list[str] | None = None) -> dict:
-    """Identify the project ecosystem from config files and dependencies."""
+def gather_signals(root: Path, config_files: list[str] | None = None) -> dict:
+    """
+    Gather ALL ecosystem signals without making decisions.
+    Returns structured facts for the LLM to interpret.
+    """
     if config_files is None:
         config_files = [f.name for f in root.iterdir() if f.is_file()]
 
     config_set = set(config_files)
 
-    result = {
-        "root": str(root),
-        "ecosystem": None,
-        "ecosystem_name": None,
-        "language": None,
-        "ui_file_extensions": [],
-        "value_file_extensions": [],
-        "confidence": "low",
-        "signals": [],
-        "known_libraries": [],
-        "styling_systems": [],
-        "uses_typescript": "tsconfig.json" in config_set or "tsconfig.app.json" in config_set,
-        "monorepo": None,
-    }
+    # Gather config file signals
+    ecosystem_signals = []
+    styling_signals = []
+    library_signals = []
+    monorepo_signals = []
+    other_signals = []
 
-    # Detect ecosystem from config files
-    for config_file, eco_id, eco_name, lang, ui_exts, val_exts in ECOSYSTEM_SIGNALS:
-        if config_file in config_set:
-            result["ecosystem"] = eco_id
-            result["ecosystem_name"] = eco_name
-            result["language"] = lang
-            result["ui_file_extensions"] = ui_exts
-            result["value_file_extensions"] = val_exts
-            result["confidence"] = "high"
-            result["signals"].append(f"Config file: {config_file}")
-            break
+    for filename in sorted(config_set):
+        if filename in CONFIG_SIGNALS:
+            signal = CONFIG_SIGNALS[filename]
+            if "ecosystem" in signal:
+                ecosystem_signals.append({
+                    "config_file": filename,
+                    "ecosystem": signal["ecosystem"],
+                    "name": signal["name"],
+                    "language": signal["lang"],
+                })
+            if "styling" in signal:
+                styling_signals.append(signal["styling"])
+            if "library" in signal:
+                library_signals.append(signal["library"])
+            if "monorepo" in signal:
+                monorepo_signals.append(signal["monorepo"])
+            if "signal" in signal:
+                other_signals.append(signal["signal"])
 
-    # Special case: Android with Gradle
-    if result["ecosystem"] is None and ("build.gradle" in config_set or "build.gradle.kts" in config_set):
-        if check_android(root):
-            result["ecosystem"] = "android"
-            result["ecosystem_name"] = "Android"
-            result["language"] = "kotlin"
-            result["ui_file_extensions"] = [".kt", ".xml"]
-            result["value_file_extensions"] = [".kt", ".xml", ".json"]
-            result["confidence"] = "high"
-            result["signals"].append("Android Gradle project")
-
-    # Refine with package.json dependencies
+    # Gather dependency signals
     pkg_deps = read_package_deps(root)
-    if pkg_deps:
-        seen_libs = set()
-        for dep, (refinement, lib_name) in DEPENDENCY_SIGNALS.items():
-            if dep in pkg_deps:
-                if lib_name not in seen_libs:
-                    if refinement:
-                        # Refine ecosystem (e.g., Vite → Vite + React)
-                        if result["ecosystem"] == "vite":
-                            result["ecosystem"] = f"vite-{refinement}"
-                            result["ecosystem_name"] = f"Vite + {lib_name}"
-                            result["signals"].append(f"Framework: {lib_name} (from deps)")
-                        elif result["ecosystem"] is None:
-                            result["ecosystem"] = refinement
-                            result["ecosystem_name"] = lib_name
-                            result["language"] = "typescript" if result["uses_typescript"] else "javascript"
-                            result["confidence"] = "medium"
-                            result["signals"].append(f"Framework: {lib_name} (from deps)")
-                    else:
-                        # It's a library, not a framework refinement
-                        if lib_name in ("Tailwind CSS", "Sass/SCSS", "styled-components", "Emotion"):
-                            result["styling_systems"].append(lib_name)
-                            result["signals"].append(f"Styling: {lib_name}")
-                        else:
-                            result["known_libraries"].append(lib_name)
-                            result["signals"].append(f"Library: {lib_name}")
-                    seen_libs.add(lib_name)
+    frameworks_from_deps = []
+    libraries_from_deps = []
+    styling_from_deps = []
+    has_workspaces = pkg_deps.pop("__has_workspaces__", False)
 
-    # Check for shadcn/ui
+    if pkg_deps:
+        seen = set()
+        for dep, signal in DEPENDENCY_SIGNALS.items():
+            if dep in pkg_deps:
+                if "framework" in signal and signal["framework"] not in seen:
+                    frameworks_from_deps.append(signal["framework"])
+                    seen.add(signal["framework"])
+                if "library" in signal and signal["library"] not in seen:
+                    libraries_from_deps.append(signal["library"])
+                    seen.add(signal["library"])
+                if "styling" in signal and signal["styling"] not in seen:
+                    styling_from_deps.append(signal["styling"])
+                    seen.add(signal["styling"])
+
+    # Check shadcn
     shadcn = check_shadcn(root)
     if shadcn:
-        result["known_libraries"].append(shadcn["name"])
-        result["signals"].append(f"shadcn/ui detected (components.json)")
-        if shadcn["component_alias"]:
-            result["signals"].append(f"shadcn component alias: {shadcn['component_alias']}")
+        libraries_from_deps.append(shadcn["name"])
 
-    # Refine with pubspec.yaml dependencies
-    pubspec_deps = read_pubspec_deps(root)
-    if pubspec_deps:
-        for dep, (_, lib_name) in FLUTTER_DEPENDENCY_SIGNALS.items():
-            if dep in pubspec_deps:
-                result["known_libraries"].append(lib_name)
+    # Count file extensions for context
+    ext_counts = count_extensions(root)
 
-    # Monorepo detection
-    monorepo_signals = {
-        "pnpm-workspace.yaml": "pnpm",
-        "lerna.json": "lerna",
-        "nx.json": "nx",
-        "turbo.json": "turborepo",
-        "rush.json": "rush",
+    # TypeScript detection
+    has_typescript = any(
+        f.startswith("tsconfig") and f.endswith(".json") for f in config_set
+    )
+
+    # Monorepo
+    if has_workspaces:
+        monorepo_signals.append("package.json workspaces")
+
+    return {
+        "root": str(root),
+
+        # All ecosystem candidates from config files (may be multiple!)
+        "ecosystem_candidates": ecosystem_signals,
+
+        # Frameworks detected from package.json dependencies
+        "frameworks_from_deps": frameworks_from_deps,
+
+        # Libraries
+        "libraries": sorted(set(library_signals + libraries_from_deps)),
+
+        # Styling systems
+        "styling_systems": sorted(set(styling_signals + styling_from_deps)),
+
+        # File extension counts (top 20) — helps judge which language dominates
+        "file_extension_counts": ext_counts,
+
+        # Signals
+        "has_typescript": has_typescript,
+        "has_package_json": "package.json" in config_set,
+        "monorepo": monorepo_signals if monorepo_signals else None,
+        "other_signals": other_signals,
+
+        # Raw config files for reference
+        "config_files_found": sorted(config_set & set(CONFIG_SIGNALS.keys())),
     }
-    for mono_file, mono_type in monorepo_signals.items():
-        if mono_file in config_set:
-            result["monorepo"] = mono_type
-            result["signals"].append(f"Monorepo: {mono_type}")
-            break
-
-    # TypeScript signal
-    if result["uses_typescript"]:
-        result["signals"].append("TypeScript detected")
-        if result["language"] == "javascript":
-            result["language"] = "typescript"
-
-    return result
 
 
 def main():
@@ -296,7 +280,7 @@ def main():
 
     root = Path(args.root).resolve()
     configs = json.loads(args.configs) if args.configs else None
-    result = identify(root, configs)
+    result = gather_signals(root, configs)
     print(json.dumps(result, indent=2))
 
 

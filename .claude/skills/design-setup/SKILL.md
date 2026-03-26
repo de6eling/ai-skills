@@ -94,12 +94,26 @@ Use these results throughout the setup process.
 
 ---
 
-## Phase 1: Confirm Ecosystem
+## Phase 1: Interpret Ecosystem and Confirm
 
-Present the auto-detected ecosystem to the user in plain language. For example:
+The auto-detected results above are RAW SIGNALS, not a conclusion. You need to
+interpret them. Look at:
+- `ecosystem_candidates` — config files found and what they suggest
+- `frameworks_from_deps` — what package.json dependencies indicate
+- `file_extension_counts` — which language actually dominates the repo
+- `libraries`, `styling_systems` — what UI tools are in use
 
-> "This looks like a **SvelteKit** project using **TypeScript** with **Sass/SCSS**
-> styling. I also detected the **PrimeNG** component library. Does that sound right?"
+Use your judgment to synthesize these into a clear picture. For example, if the
+signals show Rust from Cargo.toml BUT also React from deps, TypeScript is true,
+and .ts files dominate the extension counts — this is a TypeScript/React project
+with Rust build tooling, not a Rust project.
+
+Present your interpretation to the user:
+
+> "Based on the signals, this looks like a **TypeScript/React** monorepo using
+> **Tailwind CSS** and **Emotion** for styling, with **Radix UI** and **Material UI**
+> component libraries. I also see Cargo.toml which appears to be build tooling
+> rather than the primary ecosystem. Does that sound right?"
 
 If the user corrects something, update your understanding before proceeding.
 

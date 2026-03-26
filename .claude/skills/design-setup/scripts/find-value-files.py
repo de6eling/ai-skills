@@ -29,16 +29,33 @@ DEFAULT_EXTENSIONS = {
 }
 
 
-def score_filename(name: str) -> tuple[int, str]:
+def score_filename(name: str, file_path: Path) -> tuple[int, str]:
     """Score a filename based on how likely it is to contain token definitions."""
     stem = Path(name).stem.lower().strip("_")
+    ext = Path(name).suffix.lower()
     score = 0
     reason = ""
 
+    # Strong hint: file is inside a directory named theme/themes/tokens/styles
+    parent_name = file_path.parent.name.lower()
+    if parent_name in {"theme", "themes", "tokens", "design-tokens", "foundations", "primitives"}:
+        score += 40
+        reason = f"inside '{parent_name}/' directory"
+
     for hint in TOKEN_FILE_HINTS:
         if hint in stem:
-            score += 30
-            reason = f"filename contains '{hint}'"
+            # "variable" and "style" in .tsx/.ts files are often app-level,
+            # not design tokens. Only boost for style-specific extensions.
+            if hint in ("variable", "variables", "style", "styles"):
+                if ext in {".css", ".scss", ".sass", ".less"}:
+                    score += 30
+                    reason = reason or f"filename contains '{hint}' (style file)"
+                else:
+                    score += 5  # Low boost for .tsx/.ts — likely app code
+                    reason = reason or f"filename contains '{hint}' (non-style file, low confidence)"
+            else:
+                score += 30
+                reason = reason or f"filename contains '{hint}'"
             break
 
     # Underscore prefix (SCSS partial convention: _variables.scss)
@@ -95,7 +112,7 @@ def find_candidates(root: Path, extensions: set[str]) -> list[dict]:
             if any(p in filename for p in [".test.", ".spec.", ".stories.", ".mock."]):
                 continue
 
-            name_score, name_reason = score_filename(filename)
+            name_score, name_reason = score_filename(filename, file_path)
 
             # Check assignment density for promising files or those with name hints
             assignment_count = 0
