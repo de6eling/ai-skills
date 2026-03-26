@@ -141,7 +141,7 @@ def count_component_signals(dir_path: Path, extensions: list[str], framework: st
                 continue
             if item.suffix not in extensions:
                 continue
-            if any(skip in str(item) for skip in SKIP_DIRS):
+            if set(item.parts) & SKIP_DIRS:
                 continue
 
             stats["total_files"] += 1

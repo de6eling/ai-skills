@@ -268,7 +268,7 @@ def find_token_sources(root: Path, context: dict) -> list[dict]:
             for match in root.glob(pattern):
                 if not match.is_file():
                     continue
-                if any(skip in str(match) for skip in SKIP_DIRS):
+                if set(match.parts) & SKIP_DIRS:
                     continue
 
                 resolved = match.resolve()
@@ -311,7 +311,7 @@ def find_token_sources(root: Path, context: dict) -> list[dict]:
             for css_file in search_dir.glob("**/*"):
                 if not css_file.is_file() or css_file.suffix not in css_extensions:
                     continue
-                if any(skip in str(css_file) for skip in SKIP_DIRS):
+                if set(css_file.parts) & SKIP_DIRS:
                     continue
 
                 resolved = css_file.resolve()

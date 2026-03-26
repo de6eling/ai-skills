@@ -87,7 +87,7 @@ def is_relevant(file_path: str, paths_config: dict) -> bool:
 
     # Skip directories
     skip_dirs = paths_config.get("skip_directories", [])
-    if any(d in str(path) for d in skip_dirs):
+    if set(path.parts) & set(skip_dirs):
         return False
 
     # Skip the component directory's own files (they define the tokens)

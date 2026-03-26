@@ -92,7 +92,7 @@ def find_pages_by_convention(root: Path, framework: str, extensions: list[str]) 
                     continue
                 if file_path.suffix not in extensions:
                     continue
-                if any(skip in str(file_path) for skip in SKIP_DIRS):
+                if set(file_path.parts) & SKIP_DIRS:
                     continue
 
                 # Skip test/story files
@@ -150,7 +150,7 @@ def find_pages_by_heuristic(root: Path, extensions: list[str]) -> list[dict]:
                     continue
                 seen.add(resolved)
 
-                if any(skip in str(file_path) for skip in SKIP_DIRS):
+                if set(file_path.parts) & SKIP_DIRS:
                     continue
 
                 name = file_path.name
