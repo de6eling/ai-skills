@@ -22,37 +22,40 @@ hooks:
         - type: prompt
           prompt: >
             You are guiding an iterative design-system discovery process.
-            A script just ran during design-setup. The output is in $ARGUMENTS.
+            A script just ran. The output is in $ARGUMENTS.
 
-            Evaluate whether the results are SUFFICIENT to present to the user,
-            or whether more scanning is needed. Use these criteria:
+            Identify which script ran from the command, then evaluate:
 
-            SUFFICIENT (respond {"ok": true}) when:
-            - A component directory scan found exported names and the directory
-              has no unscanned subdirectories with significant file counts
-            - A token/value file scan found candidates with scores above 30
-            - A single file analysis found 10+ named values across multiple
-              categories (colors, sizes, fonts, etc.) — this IS comprehensive
-              even if it is only one file. Many projects define all tokens in
-              one file and that is normal.
-            - An importer search found files that use multiple components
+            **scan-dir-deep.py** (component directory scan):
+            - If exported names were found, check sibling_directories and
+              subdirectories — if there are unscanned dirs with files, say
+              {"ok": false, "reason": "Also scan sibling dir X"}.
+            - If exports were found and no siblings remain, the NEXT step is
+              to check import frequency. Say {"ok": false, "reason": "Found
+              [N] exports. Now run find-importers.py with these names to
+              check which ones are actively reused vs one-offs."}.
+            - If nothing was found, say {"ok": false, "reason": "No exports
+              found. Try scanning subdirectories or ask the user."}.
 
-            INSUFFICIENT (respond {"ok": false, "reason": "..."}) when:
-            - A component scan found exported names BUT sibling_directories
-              or subdirectories in the output contain unscanned dirs with
-              files — scan those before concluding
-            - A token scan found 0 candidates — ask the user directly
-            - A file analysis found fewer than 5 named values — look for
-              additional files
-            - Results are completely empty — ask the user
+            **find-importers.py** (import frequency check):
+            - Look at the import counts. Components with 10+ imports are
+              likely core design system components. Under 5 are likely one-offs.
+            - Say {"ok": true} — the results now have frequency data and are
+              ready to present to the user. Suggest filtering to 10+ imports.
 
-            IMPORTANT: Do NOT reject results just because there is only one
-            file. A single globals.css with 100+ tokens or a single theme.ts
-            with 30 values is a COMPLETE token source. Quality and quantity
-            of values matters more than number of files.
+            **find-value-files.py** (token file finder):
+            - If candidates with scores 60+ were found, say {"ok": true}.
+            - If only low-score candidates or 0 found, say {"ok": false,
+              "reason": "Ask the user where design tokens are defined."}.
 
-            When responding {"ok": false}, be specific about what to do next:
-            "Scan sibling directory X" or "Ask the user where tokens are defined."
+            **extract-named-values.py** (token file analysis):
+            - If 10+ named values found across multiple categories, say
+              {"ok": true} — this is sufficient even from a single file.
+            - If fewer than 5 values, say {"ok": false, "reason": "Very
+              few tokens. Check for additional token files."}.
+
+            **Any other Bash command** (grep, echo, etc.):
+            - Say {"ok": true} — don't interfere with general commands.
   Stop:
     - hooks:
         - type: command
@@ -119,62 +122,92 @@ If the user corrects something, update your understanding before proceeding.
 
 ## Phase 2: Discover Reusable UI Units (Components)
 
-This phase is **iterative**. Start broad, then narrow based on the PostToolUse
-prompt handler's guidance.
+This phase is **iterative** and uses a combination of tools. The goal is not just
+to find components, but to identify which ones are **core design system components
+meant for reuse** vs. one-off components that happen to be exported.
 
-1. Look at the structure scan's `notable_dirs` for directories with names suggesting
-   reusable units (components, ui, atoms, widgets, design, lib, shared, kit, etc.)
+The key signal is **import frequency** — a component imported by 100+ files is
+clearly a shared primitive. One imported by 2 files is a one-off.
 
-2. For the most promising candidate, run a deep scan:
-   ```bash
-   python3 ${CLAUDE_SKILL_DIR}/scripts/scan-dir-deep.py --dir <path>
-   ```
+### Step 2a: Find candidate directories
 
-3. The PostToolUse hook will evaluate and may tell you to:
-   - **Scan siblings**: "Also scan design/molecules/ next to design/atoms/"
-   - **Go deeper**: "This directory has subdirectories with more files, scan those"
-   - **Ask the user**: "Results are ambiguous, ask the user to confirm"
-   - **Move on**: "This looks complete, present to the user"
+Use Grep and Glob (your built-in tools) to search for component-like patterns.
+Look at the structure scan's `notable_dirs` for promising names (components, ui,
+atoms, widgets, design, lib, shared, kit, etc.)
 
-4. Follow the hook's guidance. Run more scans as directed. When the hook says
-   results are sufficient, present findings to the user **as a formatted table**:
+For the most promising candidates, use `scan-dir-deep.py` to get a structured
+view of exports:
+```bash
+python3 ${CLAUDE_SKILL_DIR}/scripts/scan-dir-deep.py --dir <path>
+```
 
-   > ### Components Found in `src/components/ui/`
-   >
-   > | File | Components | Type | Notes |
-   > |------|-----------|------|-------|
-   > | `button.tsx` | `Button` | Primitive | Variants: default, secondary, outline, ghost, destructive |
-   > | `card.tsx` | `Card`, `CardHeader`, `CardContent`, `CardFooter` | Compound | Requires CardHeader + CardContent children |
-   > | `dialog.tsx` | `Dialog`, `DialogTrigger`, `DialogContent`, ... | Compound | 10 sub-components |
-   > | `input.tsx` | `Input` | Primitive | |
-   >
-   > **4 files, 19 total exports, barrel export: none**
-   >
-   > Is this your complete set of UI components, or are there other directories I should check?
+The PostToolUse hook evaluates and may guide you to scan siblings, go deeper,
+or move on.
 
-   Always use a table for component presentation. Include file name, exported
-   component names, whether it's a primitive or compound component, and any
-   notable details (variants, required children, etc.)
+### Step 2b: Check import frequency
 
-5. After confirmation, read the actual component files to understand their APIs.
-   Build a record for **every** component (not just primitives). Include:
-   - `name`: Component name (e.g., "Button")
-   - `file`: File path (e.g., "src/components/ui/button.tsx")
-   - `import_path`: How to import it (e.g., "@/components/ui/button")
-   - `replaces`: The raw HTML element this replaces, in element form:
-     - Button → `<button`
-     - Input → `<input`
-     - Dialog → `<dialog`
-     - Link → `<a `
-     - For compound containers like Card that wrap `<div>`, leave empty
-   - `variants`: Available variants (e.g., ["default", "secondary", "outline"])
-   - `expected_children`: For compound components (e.g., ["CardHeader", "CardContent"])
-   - `style_controlled`: true if className/style overrides should be blocked
+Once you have a list of exported component names, check which ones are actually
+reused across the codebase:
+```bash
+python3 ${CLAUDE_SKILL_DIR}/scripts/find-importers.py --root . --names '["Button","Card","RedoButton","RedoModal"]'
+```
 
-   **Important**: Include ALL components in the record, even compound ones
-   without a direct `replaces` element. They still need composition rules.
+The PostToolUse hook will see the import counts and help you filter:
+- **High frequency (20+ imports)**: Core design system component. Include it.
+- **Medium frequency (5-19 imports)**: Likely shared. Include it.
+- **Low frequency (1-4 imports)**: Probably a one-off. Ask the user or skip.
 
-6. Ask: "Are there other directories with reusable UI units I should know about?"
+This is how you distinguish design system components from one-offs. A repo might
+have 200 exported components, but only 20-30 are the shared primitives that
+design-compose should enforce.
+
+### Step 2c: Handle multiple component systems
+
+Some projects have layered component systems (e.g., shadcn/ui primitives AND
+a custom component library built on top of them). If you find components in
+multiple directories, present BOTH to the user and ask which layer(s) should
+be enforced:
+
+> "I found two component systems:
+> 1. **shadcn/ui** in `components/ui/` — 29 low-level primitives (Button, Card, Dialog...)
+> 2. **Arbiter components** in `arbiter-components/` — 47 higher-level components (RedoButton, RedoModal, RedoTable...)
+>
+> RedoButton is imported 193 times, shadcn Button 271 times — both are heavily used.
+>
+> Should I enforce both layers, or focus on one?"
+
+### Step 2d: Present and confirm
+
+Present findings as a **formatted table** sorted by import frequency:
+
+> ### Core Design System Components
+>
+> | Component | Location | Imports | Type | Notes |
+> |-----------|----------|---------|------|-------|
+> | `Button` | `components/ui/button.tsx` | 271 | Primitive | shadcn/ui, 5 variants |
+> | `RedoButton` | `arbiter-components/buttons/redo-button.tsx` | 193 | Primitive | Custom, themed |
+> | `RedoTextInput` | `arbiter-components/input/redo-text-input.tsx` | 120 | Primitive | Custom input |
+> | `Card` | `components/ui/card.tsx` | 31 | Compound | CardHeader + CardContent |
+> | ... | | | | |
+>
+> **Showing components with 10+ imports. Is this your design system?**
+
+### Step 2e: Catalog confirmed components
+
+After confirmation, read the actual component files to understand their APIs.
+Build a record for **every** confirmed component:
+- `name`: Component name (e.g., "RedoButton")
+- `file`: File path
+- `import_path`: How to import it
+- `replaces`: The raw HTML element this replaces, in element form:
+  - Button → `<button`, Input → `<input`, Dialog → `<dialog`, Link → `<a `
+  - For compound containers like Card that wrap `<div>`, leave empty
+- `variants`: Available variants
+- `expected_children`: For compound components
+- `style_controlled`: true if className/style overrides should be blocked
+- `import_frequency`: How many files import this component
+
+Ask: "Are there other component directories I should check?"
 
 ## Phase 3: Discover Named Visual Values (Tokens)
 
