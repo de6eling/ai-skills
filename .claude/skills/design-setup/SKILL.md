@@ -301,7 +301,7 @@ Also **iterative**.
    > |--------|--------|--------|---------|------------|---------|--------|-------|
    > | `src/app/globals.css` | CSS custom properties | 62 | — | 3 | — | 8 | 104 |
    >
-   > **Spacing base**: not detected (no raw pixel spacing values — uses Tailwind utilities)
+   > **Spacing base**: 4px
    >
    > Does this capture your design token system?
 
@@ -311,6 +311,24 @@ Also **iterative**.
    script over-counted. The user should understand what they're enforcing.
 
 6. Ask: "Any other files where visual values are defined?"
+
+7. Once confirmed, **write the token catalog** to
+   `.claude/skills/design-setup/token-catalog.md`. Include:
+   - All token source files with their categories
+   - Spacing base unit
+   - Sample values from each category
+   - Notes on any token structure the user should know about
+
+8. **Write the token enforcement config** immediately:
+   ```bash
+   echo '<token_config_json>' | python3 ${CLAUDE_SKILL_DIR}/scripts/generate-config.py
+   ```
+   This writes `token-patterns.json` and the token portion of `paths.json`.
+
+   Tell the user:
+   > "Saved token catalog to `.claude/skills/design-setup/token-catalog.md` and
+   > enforcement config to `.claude/skills/design-compose/config/token-patterns.json`.
+   > You can review and edit both files. Ready to move to composition examples?"
 
 ## Phase 4: Discover Composition Examples
 
@@ -351,38 +369,43 @@ design patterns.
 
 5. Keep adding examples until the user says they're done.
 
-## Phase 5: Generate Configuration
+6. **Write the composition catalog** to
+   `.claude/skills/design-setup/composition-catalog.md`. Include:
+   - Each example page with its path
+   - What design patterns it demonstrates
+   - Which components it uses and how
 
-Collect all confirmed information into a JSON object and generate config:
+7. **Write the composition config**:
+   ```bash
+   echo '<composition_config_json>' | python3 ${CLAUDE_SKILL_DIR}/scripts/generate-config.py
+   ```
+   This writes `composition-rules.json` and updates `paths.json` with examples.
 
-```bash
-echo '<collected_config_json>' | python3 ${CLAUDE_SKILL_DIR}/scripts/generate-config.py
-```
+## Phase 5: Review
 
-The config JSON should include:
-- `ecosystem`, `language`: from Phase 1
-- `ui_file_extensions`: from ecosystem detection
-- `component_directory`, `component_directories_all`: from Phase 2
-- `confirmed_components`: array of component records from Phase 2
-- `confirmed_token_sources`: array of token source records from Phase 3 (each with path and categories list)
-- `spacing_base_px`: from Phase 3 token analysis
-- `composition_examples`: array of ALL example pages from Phase 4
-- `skip_directories`: standard list for this ecosystem
+By this point, all config files have already been written during Phases 2-4.
+Phase 5 is a **summary review**, not a generation step.
 
-Report what was generated:
+Present the complete picture:
 
-> ### Setup Complete
+> ### Setup Complete — Review
 >
-> | Config | Details |
-> |--------|---------|
-> | Components | 54 mapped across 2 layers |
-> | Token enforcement | Colors, spacing (4px base), typography |
-> | Composition examples | 3 pages added |
-> | Written to | `.claude/skills/design-compose/config/` |
+> **Files written during setup (you can review and edit any of these):**
 >
-> **Files you can review and edit:**
-> - `.claude/skills/design-setup/component-catalog.md` — full component reference
-> - `.claude/skills/design-compose/config/component-map.json` — what the enforcer checks
+> | File | Written In | Contents |
+> |------|-----------|----------|
+> | `design-setup/component-catalog.md` | Phase 2 | Full component reference |
+> | `design-setup/token-catalog.md` | Phase 3 | Token sources and categories |
+> | `design-setup/composition-catalog.md` | Phase 4 | Composition pattern examples |
+> | `design-compose/config/component-map.json` | Phase 2 | Element → component mapping |
+> | `design-compose/config/token-patterns.json` | Phase 3 | Forbidden value patterns |
+> | `design-compose/config/composition-rules.json` | Phase 4 | Compound component rules |
+> | `design-compose/config/paths.json` | Phase 2-4 | Directories and file paths |
+>
+> **Summary:**
+> - **Components**: [N] mapped across [N] layers
+> - **Tokens**: [N] sources, [spacing]px base grid
+> - **Composition**: [N] example pages
 >
 > Use `/design-compose` when building UI. Run `/design-setup` again if
 > the repository structure changes.
