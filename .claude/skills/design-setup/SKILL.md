@@ -30,18 +30,27 @@ hooks:
             - If exported names were found, check sibling_directories and
               subdirectories — if there are unscanned dirs with files, say
               {"ok": false, "reason": "Also scan sibling dir X"}.
-            - If exports were found and no siblings remain, the NEXT step is
-              to check import frequency. Say {"ok": false, "reason": "Found
-              [N] exports. Now run find-importers.py with these names to
-              check which ones are actively reused vs one-offs."}.
+            - Look at structural signals in the output:
+              * barrel_export with PascalCase names = high confidence design system
+              * consistent naming_pattern = intentional organization
+              * subdirectories like atoms/molecules = atomic design structure
+            - If the structural signals are strong (barrel exports, dedicated
+              directory, consistent naming), these are likely design system
+              components even without import data. Say {"ok": true} and note
+              the confidence signals.
+            - If structural signals are weak (random directory, mixed naming,
+              no barrel), suggest checking import frequency: {"ok": false,
+              "reason": "Structural signals are ambiguous. Run find-importers
+              to check which components are actively reused."}.
             - If nothing was found, say {"ok": false, "reason": "No exports
               found. Try scanning subdirectories or ask the user."}.
 
             **find-importers.py** (import frequency check):
-            - Look at the import counts. Components with 10+ imports are
-              likely core design system components. Under 5 are likely one-offs.
-            - Say {"ok": true} — the results now have frequency data and are
-              ready to present to the user. Suggest filtering to 10+ imports.
+            - Look at the import counts to RANK and CONFIRM. High counts
+              confirm design system components. But low counts don't
+              disqualify — components in a dedicated design system directory
+              might just be new.
+            - Say {"ok": true} — the data is ready to present.
 
             **find-value-files.py** (token file finder):
             - If candidates with scores 60+ were found, say {"ok": true}.
@@ -122,12 +131,34 @@ If the user corrects something, update your understanding before proceeding.
 
 ## Phase 2: Discover Reusable UI Units (Components)
 
-This phase is **iterative** and uses a combination of tools. The goal is not just
-to find components, but to identify which ones are **core design system components
-meant for reuse** vs. one-off components that happen to be exported.
+This phase is **iterative** and uses multiple signals to identify which components
+are **core design system components meant for reuse**. No single signal is
+definitive — use your judgment to weigh them together.
 
-The key signal is **import frequency** — a component imported by 100+ files is
-clearly a shared primitive. One imported by 2 files is a one-off.
+### Signals that indicate a design system component
+
+**Structural signals** (work even in brand-new repos with zero usage):
+- **Dedicated directory**: Files in `components/ui/`, `design-system/`, `atoms/`,
+  `primitives/` are placed there intentionally. One-offs don't get organized.
+- **Barrel exports**: An `index.ts` re-exporting 15 components is a deliberate
+  public API. One-offs don't get barrel files.
+- **Consistent naming**: All PascalCase, all prefixed (`Redo*`), all following
+  a pattern (`*.component.ts`) — intentional organization.
+- **Co-located styles**: `button.module.css` next to `button.tsx` — a component
+  that owns its styling.
+- **Component API patterns**: Props interfaces, variant systems, `children` props,
+  `forwardRef` — written to be reused. One-offs don't bother with variant systems.
+- **Storybook stories**: `.stories.tsx` files mean someone invested in documenting
+  the component for reuse.
+
+**Usage signals** (available in repos with existing code):
+- **Import frequency**: A component imported by 100+ files is obviously shared.
+  Under 5 imports might be a one-off — or might be new. Frequency confirms
+  but absence doesn't disqualify.
+
+Use **structural signals first** to identify candidates, then **import frequency
+to confirm and rank** when usage data exists. In a new project with no imports,
+structural signals alone are sufficient.
 
 ### Step 2a: Find candidate directories
 
@@ -135,77 +166,84 @@ Use Grep and Glob (your built-in tools) to search for component-like patterns.
 Look at the structure scan's `notable_dirs` for promising names (components, ui,
 atoms, widgets, design, lib, shared, kit, etc.)
 
-For the most promising candidates, use `scan-dir-deep.py` to get a structured
-view of exports:
+For promising candidates, use `scan-dir-deep.py` to get a structured view:
 ```bash
 python3 ${CLAUDE_SKILL_DIR}/scripts/scan-dir-deep.py --dir <path>
 ```
 
 The PostToolUse hook evaluates and may guide you to scan siblings, go deeper,
-or move on.
+or move to the next step.
 
-### Step 2b: Check import frequency
+### Step 2b: Assess confidence using available signals
 
-Once you have a list of exported component names, check which ones are actually
-reused across the codebase:
+Look at what `scan-dir-deep` returned and apply your judgment:
+
+- **Barrel export re-exporting PascalCase names?** → High confidence these are
+  the design system's public API.
+- **Consistent naming pattern across files?** → Intentional organization.
+- **Subdirectories like atoms/molecules/organisms?** → Atomic design structure,
+  clearly a design system.
+- **Few files but well-structured with props/variants?** → Quality over quantity.
+
+If the repo has existing code, check import frequency to confirm:
 ```bash
-python3 ${CLAUDE_SKILL_DIR}/scripts/find-importers.py --root . --names '["Button","Card","RedoButton","RedoModal"]'
+python3 ${CLAUDE_SKILL_DIR}/scripts/find-importers.py --root . --names '["Button","Card","Input"]'
 ```
 
-The PostToolUse hook will see the import counts and help you filter:
-- **High frequency (20+ imports)**: Core design system component. Include it.
-- **Medium frequency (5-19 imports)**: Likely shared. Include it.
-- **Low frequency (1-4 imports)**: Probably a one-off. Ask the user or skip.
-
-This is how you distinguish design system components from one-offs. A repo might
-have 200 exported components, but only 20-30 are the shared primitives that
-design-compose should enforce.
+Import frequency helps **rank** components in mature repos, but don't exclude
+components from a dedicated design system directory just because they have low
+import counts — they might be newly added.
 
 ### Step 2c: Handle multiple component systems
 
-Some projects have layered component systems (e.g., shadcn/ui primitives AND
-a custom component library built on top of them). If you find components in
-multiple directories, present BOTH to the user and ask which layer(s) should
-be enforced:
+Some projects have layered component systems. If you find components in
+multiple directories, present BOTH and ask:
 
-> "I found two component systems:
-> 1. **shadcn/ui** in `components/ui/` — 29 low-level primitives (Button, Card, Dialog...)
-> 2. **Arbiter components** in `arbiter-components/` — 47 higher-level components (RedoButton, RedoModal, RedoTable...)
->
-> RedoButton is imported 193 times, shadcn Button 271 times — both are heavily used.
+> "I found two component layers:
+> 1. **shadcn/ui** in `components/ui/` — 29 low-level primitives
+> 2. **Arbiter components** in `arbiter-components/` — 47 higher-level components
 >
 > Should I enforce both layers, or focus on one?"
 
 ### Step 2d: Present and confirm
 
-Present findings as a **formatted table** sorted by import frequency:
+Present findings as a **formatted table**. Include import counts if available,
+but structural signals if not:
 
-> ### Core Design System Components
+**For a mature repo (has usage data):**
+
+> ### Design System Components
 >
 > | Component | Location | Imports | Type | Notes |
 > |-----------|----------|---------|------|-------|
-> | `Button` | `components/ui/button.tsx` | 271 | Primitive | shadcn/ui, 5 variants |
-> | `RedoButton` | `arbiter-components/buttons/redo-button.tsx` | 193 | Primitive | Custom, themed |
-> | `RedoTextInput` | `arbiter-components/input/redo-text-input.tsx` | 120 | Primitive | Custom input |
+> | `Button` | `components/ui/button.tsx` | 271 | Primitive | 5 variants |
+> | `RedoButton` | `arbiter-components/buttons/` | 193 | Primitive | Themed |
 > | `Card` | `components/ui/card.tsx` | 31 | Compound | CardHeader + CardContent |
-> | ... | | | | |
+
+**For a new repo (no usage data yet):**
+
+> ### Design System Components
 >
-> **Showing components with 10+ imports. Is this your design system?**
+> | Component | Location | Signals | Type | Notes |
+> |-----------|----------|---------|------|-------|
+> | `Button` | `components/ui/button.tsx` | barrel export, variants, forwardRef | Primitive | 5 variants |
+> | `Card` | `components/ui/card.tsx` | barrel export, compound children | Compound | CardHeader + CardContent |
+> | `Input` | `components/ui/input.tsx` | barrel export, props interface | Primitive | |
+>
+> **Identified by: dedicated directory, barrel exports, consistent naming**
 
 ### Step 2e: Catalog confirmed components
 
 After confirmation, read the actual component files to understand their APIs.
 Build a record for **every** confirmed component:
-- `name`: Component name (e.g., "RedoButton")
+- `name`: Component name
 - `file`: File path
 - `import_path`: How to import it
-- `replaces`: The raw HTML element this replaces, in element form:
-  - Button → `<button`, Input → `<input`, Dialog → `<dialog`, Link → `<a `
-  - For compound containers like Card that wrap `<div>`, leave empty
+- `replaces`: The raw HTML element this replaces (`<button`, `<input`, etc.)
+  Leave empty for compound containers like Card.
 - `variants`: Available variants
 - `expected_children`: For compound components
-- `style_controlled`: true if className/style overrides should be blocked
-- `import_frequency`: How many files import this component
+- `style_controlled`: true if style overrides should be blocked
 
 Ask: "Are there other component directories I should check?"
 
