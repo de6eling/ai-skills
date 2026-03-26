@@ -205,37 +205,66 @@ multiple directories, present BOTH and ask:
 >
 > Should I enforce both layers, or focus on one?"
 
-### Step 2d: Present and confirm
+### Step 2d: Present initial findings
 
-Present findings as a **formatted table**. Include import counts if available,
-but structural signals if not:
+Present what you found as a **formatted table**, then explicitly acknowledge
+that **you probably missed things** and ask the user to fill in the gaps.
 
-**For a mature repo (has usage data):**
-
-> ### Design System Components
+> ### Design System Components (auto-discovered)
 >
-> | Component | Location | Imports | Type | Notes |
-> |-----------|----------|---------|------|-------|
-> | `Button` | `components/ui/button.tsx` | 271 | Primitive | 5 variants |
-> | `RedoButton` | `arbiter-components/buttons/` | 193 | Primitive | Themed |
-> | `Card` | `components/ui/card.tsx` | 31 | Compound | CardHeader + CardContent |
-
-**For a new repo (no usage data yet):**
-
-> ### Design System Components
+> | Component | Location | Imports | Type |
+> |-----------|----------|---------|------|
+> | `Button` | `components/ui/button.tsx` | 271 | Primitive |
+> | `RedoButton` | `arbiter-components/buttons/` | 193 | Primitive |
+> | `Card` | `components/ui/card.tsx` | 31 | Compound |
+> | ... | | | |
 >
-> | Component | Location | Signals | Type | Notes |
-> |-----------|----------|---------|------|-------|
-> | `Button` | `components/ui/button.tsx` | barrel export, variants, forwardRef | Primitive | 5 variants |
-> | `Card` | `components/ui/card.tsx` | barrel export, compound children | Compound | CardHeader + CardContent |
-> | `Input` | `components/ui/input.tsx` | barrel export, props interface | Primitive | |
+> I found these by scanning component directories and checking import frequency.
+> **But I may have missed components that live outside these directories —
+> for example, layout primitives or wrappers that sit at the source root.**
 >
-> **Identified by: dedicated directory, barrel exports, consistent naming**
+> What core components am I missing?
 
-### Step 2e: Catalog confirmed components
+**This question is critical.** In large repos, important components often live
+in unexpected places (e.g., `Flex` and `Text` at the source root, not in a
+components directory). The user knows their design system better than any
+script can discover it.
 
-After confirmation, read the actual component files to understand their APIs.
-Build a record for **every** confirmed component:
+### Step 2e: Iterate with the user (LOOP)
+
+When the user tells you about missing components:
+
+1. **Search for them**: Use Grep to find where they're defined:
+   ```
+   Grep for "export.*function Flex" or "export.*const Flex" in .tsx/.ts files
+   ```
+
+2. **Check their import frequency** to confirm importance:
+   ```bash
+   python3 ${CLAUDE_SKILL_DIR}/scripts/find-importers.py --root . --names '["Flex","Text"]'
+   ```
+
+3. **Add them to the table** and present the updated catalog:
+
+   > Added to catalog:
+   >
+   > | Component | Location | Imports | Type |
+   > |-----------|----------|---------|------|
+   > | `Flex` | `src/flex.tsx` | 514 | Layout |
+   > | `Text` | `src/text.tsx` | 504 | Typography |
+   >
+   > These are actually your most-used components! Anything else I'm missing?
+
+4. **Repeat** until the user says the catalog is complete.
+
+This loop is expected to run 2-3 times. The scripts get the obvious stuff,
+the user fills in the rest. Don't rush through this — a complete component
+catalog is the foundation everything else builds on.
+
+### Step 2f: Catalog confirmed components
+
+After the user confirms the catalog is complete, read the actual component
+files to understand their APIs. Build a record for **every** confirmed component:
 - `name`: Component name
 - `file`: File path
 - `import_path`: How to import it
@@ -244,8 +273,6 @@ Build a record for **every** confirmed component:
 - `variants`: Available variants
 - `expected_children`: For compound components
 - `style_controlled`: true if style overrides should be blocked
-
-Ask: "Are there other component directories I should check?"
 
 ## Phase 3: Discover Named Visual Values (Tokens)
 
