@@ -7,7 +7,7 @@ description: >
   frameworks, Flutter, SwiftUI, and any component-based UI system. Re-run if
   the repository structure changes.
 disable-model-invocation: true
-allowed-tools: Bash(python3 *), Read, Grep, Glob, AskUserQuestion
+allowed-tools: Bash, Read, Grep, Glob, AskUserQuestion
 hooks:
   UserPromptSubmit:
     - hooks:
@@ -24,50 +24,54 @@ hooks:
             You are guiding an iterative design-system discovery process.
             A script just ran during design-setup. The output is in $ARGUMENTS.
 
-            Evaluate the results on four dimensions:
+            Evaluate whether the results are SUFFICIENT to present to the user,
+            or whether more scanning is needed. Use these criteria:
 
-            (1) COMPLETENESS — Did the script find what we're looking for?
-            If it found component-like files in a directory, are there likely
-            MORE in sibling directories or parent directories we haven't
-            scanned yet? Look for clues like sibling_directories or
-            subdirectories in the output.
+            SUFFICIENT (respond {"ok": true}) when:
+            - A component directory scan found exported names and the directory
+              has no unscanned subdirectories with significant file counts
+            - A token/value file scan found candidates with scores above 30
+            - A single file analysis found 10+ named values across multiple
+              categories (colors, sizes, fonts, etc.) — this IS comprehensive
+              even if it is only one file. Many projects define all tokens in
+              one file and that is normal.
+            - An importer search found files that use multiple components
 
-            (2) CONFIDENCE — Are the results clearly what they claim to be,
-            or ambiguous? A directory with 10 PascalCase files exporting
-            named UI units is high confidence. A directory with 2 utility
-            files is low confidence. For token files, 20+ named color/size
-            values is high confidence; 3 assignments is low.
+            INSUFFICIENT (respond {"ok": false, "reason": "..."}) when:
+            - A component scan found exported names BUT sibling_directories
+              or subdirectories in the output contain unscanned dirs with
+              files — scan those before concluding
+            - A token scan found 0 candidates — ask the user directly
+            - A file analysis found fewer than 5 named values — look for
+              additional files
+            - Results are completely empty — ask the user
 
-            (3) EXPANSION — Should we scan adjacent directories? If we found
-            components in design/atoms/, we should also check design/molecules/
-            and any other siblings listed in the output before concluding.
+            IMPORTANT: Do NOT reject results just because there is only one
+            file. A single globals.css with 100+ tokens or a single theme.ts
+            with 30 values is a COMPLETE token source. Quality and quantity
+            of values matters more than number of files.
 
-            (4) DEPTH — Should we go deeper into a subdirectory (it has many
-            files), or zoom out to the parent (current dir seems too narrow)?
-
-            Respond {"ok": true} if the results are sufficient for the current
-            discovery phase and can be presented to the user for confirmation.
-
-            Respond {"ok": false, "reason": "SPECIFIC_NEXT_ACTION"} if more
-            scanning is needed. Be specific: "Scan sibling directory 'molecules'
-            at path X" or "Results are empty — ask the user directly where
-            their components live" or "Found tokens but no spacing values —
-            scan for additional token files."
+            When responding {"ok": false}, be specific about what to do next:
+            "Scan sibling directory X" or "Ask the user where tokens are defined."
   Stop:
     - hooks:
         - type: command
           command: "python3 $CLAUDE_PROJECT_DIR/.claude/skills/design-setup/scripts/log-hook.py --skill design-setup --event Stop"
         - type: prompt
           prompt: >
-            Check if the design-setup process is complete. The process has
-            these phases: (1) ecosystem confirmed, (2) component directories
-            identified and components cataloged, (3) token files found and
-            values extracted, (4) composition examples identified, and
-            (5) config generated for design-compose. Review the conversation.
-            If any phase was skipped or produced no results without the user
-            being informed, respond {"ok": false, "reason": "Phase [X] not
-            completed. [What needs to happen]"}. If all phases are done and
-            config was generated, respond {"ok": true}. $ARGUMENTS
+            Check if the design-setup process is complete. It has these phases:
+            (1) ecosystem confirmed (2) components discovered (3) tokens found
+            (4) composition examples identified (5) config generated.
+
+            Respond {"ok": true} if the user has been presented results for
+            each phase and either confirmed or the phase was addressed.
+            Phases where the user said "looks good", "yes", "that's right",
+            or similar count as confirmed. If Claude is currently waiting for
+            a user answer, that also counts as the phase being in progress
+            and is OK.
+
+            Respond {"ok": false, "reason": "..."} ONLY if a phase was
+            completely skipped with no user interaction at all. $ARGUMENTS
 ---
 
 # Design System Setup
@@ -119,14 +123,24 @@ prompt handler's guidance.
    - **Move on**: "This looks complete, present to the user"
 
 4. Follow the hook's guidance. Run more scans as directed. When the hook says
-   results are sufficient, present findings to the user:
+   results are sufficient, present findings to the user **as a formatted table**:
 
-   > "I found your UI components in `src/lib/design/`:
-   > - **atoms/**: Btn, TextInput (2 components)
-   > - **molecules/**: CardBlock (1 component)
-   > - Barrel export in index.ts re-exports all 3
+   > ### Components Found in `src/components/ui/`
    >
-   > Is this your design system's component directory?"
+   > | File | Components | Type | Notes |
+   > |------|-----------|------|-------|
+   > | `button.tsx` | `Button` | Primitive | Variants: default, secondary, outline, ghost, destructive |
+   > | `card.tsx` | `Card`, `CardHeader`, `CardContent`, `CardFooter` | Compound | Requires CardHeader + CardContent children |
+   > | `dialog.tsx` | `Dialog`, `DialogTrigger`, `DialogContent`, ... | Compound | 10 sub-components |
+   > | `input.tsx` | `Input` | Primitive | |
+   >
+   > **4 files, 19 total exports, barrel export: none**
+   >
+   > Is this your complete set of UI components, or are there other directories I should check?
+
+   Always use a table for component presentation. Include file name, exported
+   component names, whether it's a primitive or compound component, and any
+   notable details (variants, required children, etc.)
 
 5. After confirmation, read the actual component files to understand their APIs.
    For each component, build a record:
@@ -154,16 +168,21 @@ Also **iterative**.
    python3 ${CLAUDE_SKILL_DIR}/scripts/extract-named-values.py --file <path>
    ```
 
-3. The PostToolUse hook evaluates: enough tokens? All categories covered?
-   It may say "also check this file" or "no tokens found, ask the user."
+3. The PostToolUse hook evaluates whether enough tokens were found. A single
+   file with 20+ values across multiple categories is sufficient — many projects
+   define all tokens in one file.
 
-4. Present findings with categories and spacing base:
+4. Present findings **as a formatted table** with categories and spacing base:
 
-   > "I found design tokens in two files:
-   > - `_variables.scss`: 11 colors, 7 spacing values (6px base grid), 8 typography
-   > - `tokens.ts`: mirrors the SCSS values in TypeScript
+   > ### Design Tokens Found
    >
-   > Your spacing uses a **6px base grid**. Is that correct?"
+   > | Source | Format | Colors | Spacing | Typography | Shadows | Radius | Total |
+   > |--------|--------|--------|---------|------------|---------|--------|-------|
+   > | `src/app/globals.css` | CSS custom properties | 62 | — | 3 | — | 8 | 104 |
+   >
+   > **Spacing base**: not detected (no raw pixel spacing values — uses Tailwind utilities)
+   >
+   > Does this capture your design token system?
 
 5. Ask: "Any other files where visual values are defined?"
 
@@ -171,16 +190,19 @@ Also **iterative**.
 
 1. From confirmed component names, find where they're used:
    ```bash
-   python3 ${CLAUDE_SKILL_DIR}/scripts/find-importers.py --root . --names '["Btn","CardBlock","TextInput"]'
+   python3 ${CLAUDE_SKILL_DIR}/scripts/find-importers.py --root . --names '["Button","Card","Input"]'
    ```
 
 2. Present the top composition files:
 
-   > "Your components are composed in these files:
-   > - `src/routes/dashboard/+page.svelte` uses Btn, CardBlock
-   > - `src/routes/settings/+page.svelte` uses Btn, TextInput, CardBlock
+   > ### Composition Map
    >
-   > Which of these best represents your design patterns?"
+   > | Page | Components Used |
+   > |------|----------------|
+   > | `src/app/settings/page.tsx` | Button, Card, CardHeader, CardContent, CardFooter, Input |
+   > | `src/app/page.tsx` | Image |
+   >
+   > Which of these best represents your design patterns?
 
 ## Phase 5: Generate Configuration
 
@@ -202,13 +224,16 @@ The config JSON should include:
 
 Report what was generated:
 
-> "Setup complete. I've configured `design-compose` with:
-> - **3 components** mapped (Btn, TextInput, CardBlock)
-> - **Token enforcement** for colors, spacing (6px grid), typography
-> - **Composition examples** from your dashboard and settings pages
+> ### Setup Complete
+>
+> | Config | Details |
+> |--------|---------|
+> | Components | 4 mapped (Button, Card, Dialog, Input) |
+> | Token enforcement | Colors, typography, radius from `globals.css` |
+> | Composition examples | `settings/page.tsx` |
 >
 > Use `/design-compose` when building UI. Run `/design-setup` again if
-> the repository structure changes."
+> the repository structure changes.
 
 ## Error Handling
 
