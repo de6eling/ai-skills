@@ -143,14 +143,22 @@ prompt handler's guidance.
    notable details (variants, required children, etc.)
 
 5. After confirmation, read the actual component files to understand their APIs.
-   For each component, build a record:
-   - `name`: Component name
-   - `file`: File path
-   - `import_path`: How to import it
-   - `replaces`: What raw element/widget it replaces (if applicable)
-   - `variants`: Available variants
-   - `expected_children`: For compound components
-   - `style_controlled`: Whether style overrides should be blocked
+   Build a record for **every** component (not just primitives). Include:
+   - `name`: Component name (e.g., "Button")
+   - `file`: File path (e.g., "src/components/ui/button.tsx")
+   - `import_path`: How to import it (e.g., "@/components/ui/button")
+   - `replaces`: The raw HTML element this replaces, in element form:
+     - Button → `<button`
+     - Input → `<input`
+     - Dialog → `<dialog`
+     - Link → `<a `
+     - For compound containers like Card that wrap `<div>`, leave empty
+   - `variants`: Available variants (e.g., ["default", "secondary", "outline"])
+   - `expected_children`: For compound components (e.g., ["CardHeader", "CardContent"])
+   - `style_controlled`: true if className/style overrides should be blocked
+
+   **Important**: Include ALL components in the record, even compound ones
+   without a direct `replaces` element. They still need composition rules.
 
 6. Ask: "Are there other directories with reusable UI units I should know about?"
 

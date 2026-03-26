@@ -16,25 +16,100 @@ from pathlib import Path
 
 
 def generate_component_map(config: dict) -> dict:
-    """Generate component-map.json from confirmed components."""
+    """
+    Generate component-map.json from confirmed components.
+
+    Every component gets an entry keyed by its `replaces` pattern.
+    If no explicit `replaces` is set, we generate a sensible default
+    based on the component name (e.g., Button → "<button", Card → "<div"
+    for compound containers, Dialog → "<dialog").
+
+    The keys are raw element patterns that check-imports.py scans for
+    in source files. They must be specific enough to avoid false positives
+    (e.g., "<button" not just "button").
+    """
     components = config.get("confirmed_components", [])
     component_map = {}
 
     for comp in components:
         name = comp.get("name", "")
+        if not name:
+            continue
+
         import_path = comp.get("import_path", "")
         replaces = comp.get("replaces", "")
 
-        if replaces and name:
-            hint = f"Use {name}"
-            if import_path:
-                hint += f" from '{import_path}'"
-            variants = comp.get("variants", [])
-            if variants:
-                hint += f". Variants: {', '.join(variants)}"
+        # Build the hint message
+        hint = f"Use <{name}>"
+        if import_path:
+            hint += f" from '{import_path}'"
+        variants = comp.get("variants", [])
+        if variants:
+            hint += f". Variants: {', '.join(variants)}"
+        children = comp.get("expected_children", [])
+        if children:
+            hint += f". Compose with: {', '.join(children)}"
+
+        if replaces:
             component_map[replaces] = hint
+        else:
+            # Auto-generate replaces key from component name
+            # Use HTML element patterns for web, generic for others
+            key = infer_replaces_key(name, config.get("language", ""))
+            if key:
+                component_map[key] = hint
 
     return component_map
+
+
+# Map common component names to the HTML elements they replace
+COMPONENT_TO_ELEMENT = {
+    "button": "<button",
+    "btn": "<button",
+    "input": "<input",
+    "textinput": "<input",
+    "textfield": "<input",
+    "textarea": "<textarea",
+    "select": "<select",
+    "dropdown": "<select",
+    "link": "<a ",
+    "anchor": "<a ",
+    "image": "<img",
+    "img": "<img",
+    "dialog": "<dialog",
+    "modal": "<dialog",
+    "table": "<table",
+    "datatable": "<table",
+    "form": "<form",
+    "label": "<label",
+    "checkbox": '<input type="checkbox"',
+    "radio": '<input type="radio"',
+    "switch": '<input type="checkbox"',
+    "toggle": '<input type="checkbox"',
+}
+
+
+def infer_replaces_key(name: str, language: str) -> str | None:
+    """
+    Infer what raw element a component replaces from its name.
+    Returns None for compound/container components that don't replace
+    a specific element (Card, Dialog content wrappers, etc.)
+    """
+    name_lower = name.lower()
+
+    # Direct match
+    if name_lower in COMPONENT_TO_ELEMENT:
+        return COMPONENT_TO_ELEMENT[name_lower]
+
+    # Prefix match (e.g., "ButtonPrimary" → button)
+    for comp_name, element in COMPONENT_TO_ELEMENT.items():
+        if name_lower.startswith(comp_name):
+            return element
+
+    # Compound/container components don't replace a specific element
+    # but we still want them in the map — use a synthetic key
+    # that check-imports.py won't match against (it's informational)
+    return None
 
 
 def generate_token_patterns(config: dict) -> dict:

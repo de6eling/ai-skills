@@ -107,13 +107,19 @@ def main():
         # Skip comments
         if stripped.startswith("//") or stripped.startswith("{/*") or stripped.startswith("*"):
             continue
+        # Skip import statements (importing the design system IS correct)
+        if stripped.startswith("import "):
+            continue
 
         for raw_element, replacement in component_map.items():
-            # Case-insensitive check for the raw element
-            if raw_element.lower() in line.lower():
-                violations.append(
-                    f"Line {line_num}: found `{raw_element.strip()}` — {replacement}"
-                )
+            # Only match patterns that look like HTML elements (start with "<")
+            # This avoids false positives from matching bare words like "button"
+            # in variable names, comments, or string content
+            if raw_element.startswith("<"):
+                if raw_element.lower() in line.lower():
+                    violations.append(
+                        f"Line {line_num}: found `{raw_element.strip()}` — {replacement}"
+                    )
 
     if not violations:
         sys.exit(0)

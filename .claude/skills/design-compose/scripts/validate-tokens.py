@@ -90,14 +90,17 @@ def is_relevant(file_path: str, paths_config: dict) -> bool:
     if set(path.parts) & set(skip_dirs):
         return False
 
-    # Skip the component directory's own files (they define the tokens)
-    component_dir = paths_config.get("component_directory", "")
-    if component_dir and component_dir in str(path):
-        # But only skip if it's the actual component source, not a consumer
-        # Check if it's a .css or token-like file
-        token_sources = paths_config.get("token_sources", [])
-        if any(ts in str(path) for ts in token_sources):
+    # Skip token source files — they define the tokens, not consume them.
+    # Check by matching the end of the path against each token source.
+    token_sources = paths_config.get("token_sources", [])
+    for ts in token_sources:
+        if ts and str(path).endswith(ts):
             return False
+
+    # Skip the component directory's own files (they define the components)
+    component_dir = paths_config.get("component_directory", "")
+    if component_dir and str(path).replace("\\", "/").find(component_dir) >= 0:
+        return False
 
     return True
 
