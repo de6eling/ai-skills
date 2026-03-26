@@ -6,17 +6,26 @@ description: >
   new ones, and that design tokens are used instead of hardcoded values.
   Activates when building components, pages, layouts, or any front-end
   implementation work.
-allowed-tools: Bash(python *), Read, Grep, Glob
+allowed-tools: Bash(python3 *), Read, Grep, Glob
 hooks:
+  UserPromptSubmit:
+    - hooks:
+        - type: command
+          command: "python3 ${CLAUDE_SKILL_DIR}/scripts/log-hook.py --skill design-compose --event UserPromptSubmit"
   PostToolUse:
+    - hooks:
+        - type: command
+          command: "python3 ${CLAUDE_SKILL_DIR}/scripts/log-hook.py --skill design-compose --event PostToolUse"
     - matcher: "Edit|Write"
       hooks:
         - type: command
-          command: "python ${CLAUDE_SKILL_DIR}/scripts/validate-tokens.py"
+          command: "python3 ${CLAUDE_SKILL_DIR}/scripts/validate-tokens.py"
         - type: command
-          command: "python ${CLAUDE_SKILL_DIR}/scripts/check-imports.py"
+          command: "python3 ${CLAUDE_SKILL_DIR}/scripts/check-imports.py"
   Stop:
     - hooks:
+        - type: command
+          command: "python3 ${CLAUDE_SKILL_DIR}/scripts/log-hook.py --skill design-compose --event Stop"
         - type: prompt
           prompt: >
             Review the UI code written in this session. Check:

@@ -9,7 +9,14 @@ description: >
 disable-model-invocation: true
 allowed-tools: Bash(python3 *), Read, Grep, Glob, AskUserQuestion
 hooks:
+  UserPromptSubmit:
+    - hooks:
+        - type: command
+          command: "python3 ${CLAUDE_SKILL_DIR}/scripts/log-hook.py --skill design-setup --event UserPromptSubmit"
   PostToolUse:
+    - hooks:
+        - type: command
+          command: "python3 ${CLAUDE_SKILL_DIR}/scripts/log-hook.py --skill design-setup --event PostToolUse"
     - matcher: "Bash"
       hooks:
         - type: prompt
@@ -48,6 +55,8 @@ hooks:
             scan for additional token files."
   Stop:
     - hooks:
+        - type: command
+          command: "python3 ${CLAUDE_SKILL_DIR}/scripts/log-hook.py --skill design-setup --event Stop"
         - type: prompt
           prompt: >
             Check if the design-setup process is complete. The process has
