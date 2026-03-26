@@ -12,11 +12,11 @@ hooks:
   UserPromptSubmit:
     - hooks:
         - type: command
-          command: "python3 ${CLAUDE_SKILL_DIR}/scripts/log-hook.py --skill design-setup --event UserPromptSubmit"
+          command: "python3 $CLAUDE_PROJECT_DIR/.claude/skills/design-setup/scripts/log-hook.py --skill design-setup --event UserPromptSubmit"
   PostToolUse:
     - hooks:
         - type: command
-          command: "python3 ${CLAUDE_SKILL_DIR}/scripts/log-hook.py --skill design-setup --event PostToolUse"
+          command: "python3 $CLAUDE_PROJECT_DIR/.claude/skills/design-setup/scripts/log-hook.py --skill design-setup --event PostToolUse"
     - matcher: "Bash"
       hooks:
         - type: prompt
@@ -56,7 +56,7 @@ hooks:
   Stop:
     - hooks:
         - type: command
-          command: "python3 ${CLAUDE_SKILL_DIR}/scripts/log-hook.py --skill design-setup --event Stop"
+          command: "python3 $CLAUDE_PROJECT_DIR/.claude/skills/design-setup/scripts/log-hook.py --skill design-setup --event Stop"
         - type: prompt
           prompt: >
             Check if the design-setup process is complete. The process has

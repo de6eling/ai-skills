@@ -11,11 +11,11 @@ hooks:
   UserPromptSubmit:
     - hooks:
         - type: command
-          command: "python3 ${CLAUDE_SKILL_DIR}/scripts/log-hook.py --skill design-compose --event UserPromptSubmit"
+          command: "python3 $CLAUDE_PROJECT_DIR/.claude/skills/design-compose/scripts/log-hook.py --skill design-compose --event UserPromptSubmit"
   PostToolUse:
     - hooks:
         - type: command
-          command: "python3 ${CLAUDE_SKILL_DIR}/scripts/log-hook.py --skill design-compose --event PostToolUse"
+          command: "python3 $CLAUDE_PROJECT_DIR/.claude/skills/design-compose/scripts/log-hook.py --skill design-compose --event PostToolUse"
     - matcher: "Edit|Write"
       hooks:
         - type: command
@@ -25,7 +25,7 @@ hooks:
   Stop:
     - hooks:
         - type: command
-          command: "python3 ${CLAUDE_SKILL_DIR}/scripts/log-hook.py --skill design-compose --event Stop"
+          command: "python3 $CLAUDE_PROJECT_DIR/.claude/skills/design-compose/scripts/log-hook.py --skill design-compose --event Stop"
         - type: prompt
           prompt: >
             Review the UI code written in this session. Check:
