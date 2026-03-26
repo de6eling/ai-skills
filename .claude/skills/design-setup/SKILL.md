@@ -7,7 +7,7 @@ description: >
   frameworks, Flutter, SwiftUI, and any component-based UI system. Re-run if
   the repository structure changes.
 disable-model-invocation: true
-allowed-tools: Bash, Read, Grep, Glob, AskUserQuestion
+allowed-tools: Bash, Read, Grep, Glob, Write, AskUserQuestion
 hooks:
   UserPromptSubmit:
     - hooks:
@@ -69,21 +69,6 @@ hooks:
     - hooks:
         - type: command
           command: "python3 $CLAUDE_PROJECT_DIR/.claude/skills/design-setup/scripts/log-hook.py --skill design-setup --event Stop"
-        - type: prompt
-          prompt: >
-            Check if the design-setup process is complete. It has these phases:
-            (1) ecosystem confirmed (2) components discovered (3) tokens found
-            (4) composition examples identified (5) config generated.
-
-            Respond {"ok": true} if the user has been presented results for
-            each phase and either confirmed or the phase was addressed.
-            Phases where the user said "looks good", "yes", "that's right",
-            or similar count as confirmed. If Claude is currently waiting for
-            a user answer, that also counts as the phase being in progress
-            and is OK.
-
-            Respond {"ok": false, "reason": "..."} ONLY if a phase was
-            completely skipped with no user interaction at all. $ARGUMENTS
 ---
 
 # Design System Setup
@@ -144,10 +129,10 @@ definitive — use your judgment to weigh them together.
   public API. One-offs don't get barrel files.
 - **Consistent naming**: All PascalCase, all prefixed (`Redo*`), all following
   a pattern (`*.component.ts`) — intentional organization.
-- **Co-located styles**: `button.module.css` next to `button.tsx` — a component
-  that owns its styling.
 - **Component API patterns**: Props interfaces, variant systems, `children` props,
   `forwardRef` — written to be reused. One-offs don't bother with variant systems.
+- **Co-located styles**: `button.module.css` next to `button.tsx` — a component
+  that owns its styling.
 - **Storybook stories**: `.stories.tsx` files mean someone invested in documenting
   the component for reuse.
 
@@ -261,10 +246,26 @@ This loop is expected to run 2-3 times. The scripts get the obvious stuff,
 the user fills in the rest. Don't rush through this — a complete component
 catalog is the foundation everything else builds on.
 
-### Step 2f: Catalog confirmed components
+### Step 2f: Write the component catalog
 
-After the user confirms the catalog is complete, read the actual component
-files to understand their APIs. Build a record for **every** confirmed component:
+Once the user confirms the catalog is complete, **write it to a file** so the
+user can review and edit it. Save to `.claude/skills/design-setup/component-catalog.md`.
+
+This file is the human-readable record of the design system. It should include:
+- All components organized by layer/directory
+- File paths and import paths
+- Component type (primitive, compound, layout, etc.)
+- Notes on variants, props, children patterns
+
+Tell the user:
+
+> "I've saved the full component catalog to `.claude/skills/design-setup/component-catalog.md`.
+> Take a look — you can edit this file directly if anything needs adjusting.
+> Let me know when you're ready to move to token discovery."
+
+### Step 2g: Build component records
+
+Read the component files to understand APIs and build a record for each:
 - `name`: Component name
 - `file`: File path
 - `import_path`: How to import it
@@ -304,25 +305,51 @@ Also **iterative**.
    >
    > Does this capture your design token system?
 
-5. Ask: "Any other files where visual values are defined?"
+5. **If the user has questions about the tokens** (e.g., "that seems like a lot
+   of typography definitions — what's going on there?"), investigate! Read the
+   actual file, explain what you find, and correct the token count if the
+   script over-counted. The user should understand what they're enforcing.
+
+6. Ask: "Any other files where visual values are defined?"
 
 ## Phase 4: Discover Composition Examples
 
-1. From confirmed component names, find where they're used:
+This phase relies on the user more than the others. Scripts can find files that
+import many components, but the user knows which pages best represent their
+design patterns.
+
+1. From confirmed component names, run the importer search:
    ```bash
    python3 ${CLAUDE_SKILL_DIR}/scripts/find-importers.py --root . --names '["Button","Card","Input"]'
    ```
 
-2. Present the top composition files:
+2. Present the top composition files as suggestions:
 
-   > ### Composition Map
+   > ### Suggested Composition Examples
+   >
+   > These files use the most design system components together:
    >
    > | Page | Components Used |
    > |------|----------------|
-   > | `src/app/settings/page.tsx` | Button, Card, CardHeader, CardContent, CardFooter, Input |
-   > | `src/app/page.tsx` | Image |
+   > | `src/app/settings/page.tsx` | Button, Card, Input, Modal, Text, Flex |
+   > | `src/orders/order-detail.tsx` | Button, Card, Table, Badge, Text |
    >
-   > Which of these best represents your design patterns?
+   > Are any of these good examples of your design patterns? Or is there a
+   > specific page you'd like me to find? You can describe it, like:
+   > "the marketing analytics dashboard" or "the order tracking landing page"
+
+3. **When the user describes a page**, search for it:
+   - Use Grep to search for keywords from their description in filenames and content
+   - Present what you found and confirm it's the right file
+   - Read the file to understand the composition patterns it demonstrates
+
+4. **Support multiple composition examples.** Ask:
+
+   > "Would you like to add more examples? Different pages can show different
+   > patterns — a dashboard layout, a form-heavy settings page, a data table view.
+   > The more examples, the better design-compose understands your patterns."
+
+5. Keep adding examples until the user says they're done.
 
 ## Phase 5: Generate Configuration
 
@@ -339,7 +366,7 @@ The config JSON should include:
 - `confirmed_components`: array of component records from Phase 2
 - `confirmed_token_sources`: array of token source records from Phase 3 (each with path and categories list)
 - `spacing_base_px`: from Phase 3 token analysis
-- `composition_examples`: from Phase 4
+- `composition_examples`: array of ALL example pages from Phase 4
 - `skip_directories`: standard list for this ecosystem
 
 Report what was generated:
@@ -348,9 +375,14 @@ Report what was generated:
 >
 > | Config | Details |
 > |--------|---------|
-> | Components | 4 mapped (Button, Card, Dialog, Input) |
-> | Token enforcement | Colors, typography, radius from `globals.css` |
-> | Composition examples | `settings/page.tsx` |
+> | Components | 54 mapped across 2 layers |
+> | Token enforcement | Colors, spacing (4px base), typography |
+> | Composition examples | 3 pages added |
+> | Written to | `.claude/skills/design-compose/config/` |
+>
+> **Files you can review and edit:**
+> - `.claude/skills/design-setup/component-catalog.md` — full component reference
+> - `.claude/skills/design-compose/config/component-map.json` — what the enforcer checks
 >
 > Use `/design-compose` when building UI. Run `/design-setup` again if
 > the repository structure changes.
