@@ -75,7 +75,7 @@ SKIP_FILE_PATTERNS = {
 
 
 def is_component_file(file_path: Path, extensions: list[str]) -> bool:
-    """Check if a file could be a component based on naming conventions."""
+    """Check if a file could be a component based on naming and content."""
     if file_path.suffix not in extensions:
         return False
 
@@ -92,6 +92,26 @@ def is_component_file(file_path: Path, extensions: list[str]) -> bool:
         return True
     if name == "index" and file_path.parent.name[0:1].isupper():
         return True
+
+    # Many component libraries use lowercase filenames (e.g., shadcn: button.tsx)
+    # but export PascalCase components. Check file content as a fallback.
+    try:
+        content = file_path.read_text(errors="ignore")[:5000]
+        # Look for PascalCase exports — strong signal of a component file
+        if re.search(r"export\s+(?:default\s+)?(?:function|const|class)\s+[A-Z]\w+", content):
+            return True
+        # React.forwardRef with PascalCase assignment
+        if re.search(r"(?:const|let)\s+[A-Z]\w+\s*=\s*(?:React\.)?forwardRef", content):
+            return True
+        # Named re-exports with PascalCase: export { Button, Card }
+        # Use DOTALL to handle multi-line exports
+        re_export = re.search(r"export\s*\{([^}]+)\}", content, re.DOTALL)
+        if re_export:
+            names = [n.strip().split(" as ")[-1].strip() for n in re_export.group(1).split(",")]
+            if any(n and n[0].isupper() for n in names):
+                return True
+    except OSError:
+        pass
 
     return False
 

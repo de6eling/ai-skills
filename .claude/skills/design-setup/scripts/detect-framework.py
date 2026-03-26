@@ -58,6 +58,7 @@ STYLING_SIGNALS = [
     ("tailwind.config.mjs", "tailwind", "Tailwind CSS"),
     ("postcss.config.js", "postcss", "PostCSS"),
     ("postcss.config.mjs", "postcss", "PostCSS"),
+    ("tailwindcss", "tailwind", "Tailwind CSS"),  # package dep (v4+)
     ("styled-components", "styled-components", "styled-components"),  # package dep
     ("@emotion/react", "emotion", "Emotion"),  # package dep
     ("sass", "sass", "Sass/SCSS"),  # package dep
@@ -80,7 +81,9 @@ COMPONENT_LIBRARY_SIGNALS = {
     "flowbite": ("flowbite", "Flowbite"),
     "primevue": ("primevue", "PrimeVue"),
     "primereact": ("primereact", "PrimeReact"),
+    "primeng": ("primeng", "PrimeNG"),
     "element-plus": ("element-plus", "Element Plus"),
+    "@angular/material": ("angular-material", "Angular Material"),
 }
 
 # TypeScript signals
