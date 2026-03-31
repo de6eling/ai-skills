@@ -1,12 +1,44 @@
 #!/usr/bin/env python3
 """
-Stop-time validation: scans all UI files for token and import violations.
+validate-stop.py — Final check before the session ends
+=======================================================
 
-Reuses the same validation logic as validate-tokens.py and check-imports.py
-but runs across all relevant files at once, as a final gate before stopping.
+WHAT THIS DOES:
+  When a design-compose session finishes, this script does one last
+  sweep of all the files that were changed. It runs the same checks
+  as validate-tokens.py and check-imports.py, but across every file
+  you touched — not just the last one written.
 
-Hook handler: Stop
-Exit 2 with feedback on violations (triggers re-prompt), exit 0 on pass.
+  Think of it as a final quality gate before the work is done.
+
+WHEN DOES IT RUN:
+  Once, right when the session is about to end. If it finds problems,
+  the AI is sent back to fix them before it can finish.
+
+WHAT HAPPENS WHEN IT FINDS SOMETHING:
+  - All files clean: session ends normally
+  - Problems found: AI gets a list of every issue across every file
+    and has to fix all of them before the session can end
+
+WHICH FILES DOES IT CHECK:
+  Only files that were changed in the current session. It uses git to
+  figure out which files are new or modified. This means you won't be
+  blocked by pre-existing issues in files you didn't touch.
+
+  We started by checking ALL files in the project, but that was too
+  aggressive — designers were getting blocked by problems in code they
+  didn't write. Scoping to "your changes only" fixed that.
+
+WHERE TO SEE THE RESULTS:
+  Open .claude/logs/validation.log — you'll see:
+    [validate-stop] ALL: PASS (10 files checked)
+    [validate-stop] ALL: FAIL (3 issues in 10 files)
+
+HOW IT REUSES THE OTHER SCRIPTS:
+  Instead of duplicating the checking logic, this script loads
+  validate-tokens.py and check-imports.py as helpers and calls their
+  functions directly. If those scripts are updated, this one
+  automatically benefits.
 """
 
 import importlib.util
@@ -16,6 +48,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
+# ---------------------------------------------------------------------------
+# Write a line to the log file.
+# ---------------------------------------------------------------------------
+
 def log_run(result: str):
     log_dir = Path.cwd() / ".claude" / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -24,8 +60,12 @@ def log_run(result: str):
         f.write(f"{ts} [validate-stop] ALL: {result}\n")
 
 
+# ---------------------------------------------------------------------------
+# Load a sibling script so we can call its functions. This is how
+# validate-stop reuses the checking logic from the other scripts.
+# ---------------------------------------------------------------------------
+
 def load_module(name: str):
-    """Load a sibling script as a module."""
     script_dir = Path(__file__).parent
     spec = importlib.util.spec_from_file_location(name, script_dir / f"{name}.py")
     mod = importlib.util.module_from_spec(spec)
@@ -33,21 +73,25 @@ def load_module(name: str):
     return mod
 
 
+# ---------------------------------------------------------------------------
+# Find all UI files that were changed or created since the last commit.
+# Uses git to figure out what's new or modified. Skips the same things
+# as the per-file scripts: component sources, token files, tests, etc.
+# ---------------------------------------------------------------------------
+
 def find_modified_ui_files(paths_config: dict) -> list[Path]:
-    """Find UI files modified in the current git working tree."""
     import subprocess
 
     extensions = set(
         paths_config.get("ui_file_extensions", [".tsx", ".jsx", ".vue", ".svelte"])
     )
 
-    # Component directory files define the system — skip them
     component_dirs = set(paths_config.get("component_directories_all", []))
     component_dir = paths_config.get("component_directory", "")
     if component_dir:
         component_dirs.add(component_dir)
 
-    # Get modified + untracked files from git
+    # Ask git: what changed since the last commit?
     try:
         result = subprocess.run(
             ["git", "diff", "--name-only", "HEAD"],
@@ -55,6 +99,7 @@ def find_modified_ui_files(paths_config: dict) -> list[Path]:
         )
         modified = set(result.stdout.strip().splitlines())
 
+        # Also grab brand-new files that haven't been committed yet
         result = subprocess.run(
             ["git", "ls-files", "--others", "--exclude-standard"],
             capture_output=True, text=True, timeout=10,
@@ -93,14 +138,22 @@ def find_modified_ui_files(paths_config: dict) -> list[Path]:
     return sorted(results)
 
 
+# ---------------------------------------------------------------------------
+# Entry point: find all changed files, run both checks on each one.
+#
+# Exit code 0 = everything is clean
+# Exit code 2 = problems found, AI has to fix them before finishing
+# ---------------------------------------------------------------------------
+
 def main():
-    # Read stdin (Stop hook input) — we don't need it but must consume it
+    # Read and discard the input (we don't need it, but we have to
+    # consume it or the script hangs)
     try:
         sys.stdin.read()
     except Exception:
         pass
 
-    # Load configs via the sibling modules
+    # Load the checking logic from the other scripts
     tokens_mod = load_module("validate-tokens")
     imports_mod = load_module("check-imports")
 
@@ -124,14 +177,14 @@ def main():
 
         name = file_path.relative_to(Path.cwd())
 
-        # Token violations
+        # Check 1: hardcoded colors, sizes, etc.
         violations = tokens_mod.validate_content(content, str(file_path), token_config)
         for v in violations:
             all_issues.append(
                 f"  {name}:{v['line']} — {v['description']}: `{v['match']}`. {v['fix_hint']}"
             )
 
-        # Import violations (raw HTML instead of design system components)
+        # Check 2: raw HTML instead of design system components
         if component_map:
             for line_num, line in enumerate(content.splitlines(), 1):
                 stripped = line.strip()

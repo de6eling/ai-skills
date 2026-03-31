@@ -38,76 +38,48 @@ hooks:
 
 # Design System Composer
 
-You are building UI in a project with an established design system.
-Your primary job is to **compose existing components**, not create new ones.
+Compose existing components — don't create new ones.
 
-## Setup Check
+## Before You Start
 
-Before starting, verify that design-setup has been run. Check if
-`${CLAUDE_SKILL_DIR}/config/paths.json` exists.
+Check if `${CLAUDE_SKILL_DIR}/config/paths.json` exists. If not, tell the
+user to run `/design-setup` first and stop.
 
-If it does NOT exist, tell the user:
+If it exists, read `paths.json`, `component-map.json`, and
+`composition-rules.json` to understand the project's components, tokens,
+and compound patterns.
 
-> "The design system hasn't been configured for this project yet.
-> Run `/design-setup` first to discover your components and tokens."
+## Rules
 
-Then stop. Do not proceed without configuration.
+1. **Compose, don't create.** Only create new components if nothing in
+   the catalog works, and explain why to the user first.
+2. **Use variants and props.** Not className overrides.
+3. **Tokens for everything.** No hardcoded colors, sizes, or spacing.
+4. **Compound components stay compound.** Follow composition-rules.json.
+5. **Match existing patterns.** Read a similar page before building.
 
-If it DOES exist, read `${CLAUDE_SKILL_DIR}/config/paths.json` to understand
-the project structure, then read `${CLAUDE_SKILL_DIR}/config/component-map.json`
-to understand available components.
+## Workflow
 
-## Core Rules
-
-1. **Compose, don't create.** Use existing components for every UI element.
-   Only create a new component if nothing in the component map serves the
-   purpose, and explain why to the user first.
-
-2. **Use the variant system.** Components have variants for a reason. Use
-   `<Button variant="secondary">` not `<Button className="bg-gray-200">`.
-
-3. **Tokens for everything.** All colors, spacing, typography, shadows, and
-   border-radii come from design tokens. No hardcoded values. The PostToolUse
-   hooks will catch violations automatically.
-
-4. **Compound components stay compound.** Read `config/composition-rules.json`
-   for required composition patterns. Don't skip the pieces.
-
-5. **Match existing patterns.** Before building a page layout, read a similar
-   existing page and match its structure.
-
-## When Building a Page or View
-
-1. Read the config files to understand available components
-2. Look at 1-2 similar existing pages to understand composition patterns
-3. Plan the layout using existing components
-4. Build iteratively — the PostToolUse hooks will catch token and import
-   violations on each edit and give you specific feedback
-5. The Stop hook will do a final composition review when you're done
+1. Read configs and 1–2 similar existing pages
+2. Build using existing components
+3. After each Write/Edit, report the validation results (see below)
+4. If a hook flags new undocumented components, ask the user about each
+5. If a hook flags a violation, fix it before continuing
 
 ## Reporting Validation Results
 
-After every Write or Edit, the PostToolUse hooks run three validation
-scripts automatically. **You MUST include a validation summary in your
-response after each file write**, reporting what the hooks found:
+Three Python scripts run automatically after every Write/Edit. After
+each file write, show what they found:
 
 ```
-Validation:
-  ✓ Tokens — no hardcoded values
-  ✓ Imports — design system components used correctly
-  ✓ Catalog — all components documented
+Scripts ran (PostToolUse → Edit|Write):
+  ✓ validate-tokens.py — no hardcoded values
+  ✓ check-imports.py — design system components used correctly
+  ✓ check-new-components.py — all components in catalog
+Full log: .claude/logs/validation.log
 ```
 
-If a hook flags an issue, show it with ✗ and fix it before continuing.
-If a hook flags new undocumented components, ask the user about each one.
-
-At the end of the session, the Stop hook runs a final validation across
-all modified files. Include that result in your closing summary too.
-
-## When You Need Something New
-
-If the component map doesn't have what you need:
-
-1. Check if an existing component can serve the purpose with different props
-2. Check if composing existing components together achieves the goal
-3. Only if neither works, tell the user what you need and why, before creating it
+Show ✗ for failures and fix them. At the end, report the Stop hook's
+final scan of all modified files. Point the designer to
+`.claude/logs/validation.log` for the full record — the scripts
+document themselves there with timestamps and results.
