@@ -6,7 +6,7 @@ description: >
   new ones, and that design tokens are used instead of hardcoded values.
   Activates when building components, pages, layouts, or any front-end
   implementation work.
-allowed-tools: Bash(python3 *), Read, Grep, Glob
+allowed-tools: Bash(python3 *), Read, Write, Edit, Grep, Glob
 hooks:
   UserPromptSubmit:
     - hooks:
@@ -19,23 +19,21 @@ hooks:
     - matcher: "Edit|Write"
       hooks:
         - type: command
-          command: "python3 ${CLAUDE_SKILL_DIR}/scripts/validate-tokens.py"
+          command: "python3 $CLAUDE_PROJECT_DIR/.claude/skills/design-compose/scripts/validate-tokens.py"
+          statusMessage: "Checking design tokens..."
         - type: command
-          command: "python3 ${CLAUDE_SKILL_DIR}/scripts/check-imports.py"
+          command: "python3 $CLAUDE_PROJECT_DIR/.claude/skills/design-compose/scripts/check-imports.py"
+          statusMessage: "Checking component imports..."
+        - type: command
+          command: "python3 $CLAUDE_PROJECT_DIR/.claude/skills/design-compose/scripts/check-new-components.py"
+          statusMessage: "Checking for new components..."
   Stop:
     - hooks:
         - type: command
           command: "python3 $CLAUDE_PROJECT_DIR/.claude/skills/design-compose/scripts/log-hook.py --skill design-compose --event Stop"
-        - type: prompt
-          prompt: >
-            Review the UI code written in this session. Check:
-            (1) Are design system components used instead of raw HTML elements
-            where available? (2) Are components composed following standard
-            patterns — e.g., Card contains CardHeader + CardContent, Dialog
-            contains DialogContent? (3) Are style overrides (className, style
-            props) avoided on components that control their own appearance?
-            If issues found, respond {"ok": false, "reason": "[specific
-            issues and fixes]"}. If clean, respond {"ok": true}. $ARGUMENTS
+        - type: command
+          command: "python3 $CLAUDE_PROJECT_DIR/.claude/skills/design-compose/scripts/validate-stop.py"
+          statusMessage: "Running final design system validation..."
 ---
 
 # Design System Composer
@@ -86,6 +84,25 @@ to understand available components.
 4. Build iteratively — the PostToolUse hooks will catch token and import
    violations on each edit and give you specific feedback
 5. The Stop hook will do a final composition review when you're done
+
+## Reporting Validation Results
+
+After every Write or Edit, the PostToolUse hooks run three validation
+scripts automatically. **You MUST include a validation summary in your
+response after each file write**, reporting what the hooks found:
+
+```
+Validation:
+  ✓ Tokens — no hardcoded values
+  ✓ Imports — design system components used correctly
+  ✓ Catalog — all components documented
+```
+
+If a hook flags an issue, show it with ✗ and fix it before continuing.
+If a hook flags new undocumented components, ask the user about each one.
+
+At the end of the session, the Stop hook runs a final validation across
+all modified files. Include that result in your closing summary too.
 
 ## When You Need Something New
 

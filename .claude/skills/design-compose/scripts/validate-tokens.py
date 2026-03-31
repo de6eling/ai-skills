@@ -12,7 +12,17 @@ Exit 2 with feedback on violations, exit 0 on pass.
 import json
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
+
+
+def log_run(script: str, file_path: str, result: str):
+    log_dir = Path.cwd() / ".claude" / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    name = Path(file_path).name if file_path else "N/A"
+    with open(log_dir / "validation.log", "a") as f:
+        f.write(f"{ts} [{script}] {name}: {result}\n")
 
 
 def load_config() -> dict:
@@ -185,7 +195,11 @@ def main():
     violations = validate_content(content, file_path, config)
 
     if not violations:
+        log_run("validate-tokens", file_path, "PASS")
+        print(f"✓ validate-tokens: PASS — no hardcoded values in {Path(file_path).name}")
         sys.exit(0)
+
+    log_run("validate-tokens", file_path, f"FAIL ({len(violations)} violations)")
 
     # Format feedback
     lines = [f"Design token violations in {file_path}:"]
