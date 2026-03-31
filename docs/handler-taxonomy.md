@@ -242,7 +242,7 @@ The hook configuration that runs this after every edit:
         "hooks": [
           {
             "type": "command",
-            "command": "python ${CLAUDE_SKILL_DIR}/scripts/validate-tokens.py"
+            "command": "python $CLAUDE_PROJECT_DIR/.claude/skills/design-enforcer/scripts/validate-tokens.py"
           }
         ]
       }
@@ -262,7 +262,7 @@ hooks:
     - matcher: "Edit|Write"
       hooks:
         - type: command
-          command: "python ${CLAUDE_SKILL_DIR}/scripts/validate-tokens.py"
+          command: "python $CLAUDE_PROJECT_DIR/.claude/skills/design-enforcer/scripts/validate-tokens.py"
 ---
 ```
 
@@ -459,10 +459,12 @@ If you find yourself writing a 200-line script full of heuristics and special ca
 
 Prompt handlers:
 
+- **Not supported on PostToolUse.** Prompt handlers only work on `PreToolUse`, `PermissionRequest`, `Stop`, and `UserPromptSubmit`. If you need judgment after a file is written, use a command handler or move the check to the `Stop` hook.
 - Can't read other files. They only see the hook's input data (what Claude just did or is about to do).
 - Make a single judgment call. They can't explore, investigate, or do multi-step reasoning.
 - Are probabilistic. Two runs might give different answers on edge cases. This is fine for judgment calls — it's a problem if you want deterministic enforcement.
-- Cost tokens every time they fire. A prompt handler on `PostToolUse` with an `Edit|Write` matcher runs on every single file edit. If Claude edits 30 files, that's 30 Haiku calls.
+- **Stop hook prompts use a different response format:** `{"decision": "block", "reason": "..."}` to block, or `{}` to allow. They do NOT use `{"ok": true/false}`. When a Stop prompt returns "block", Claude Code shows an error message rather than re-prompting Claude to fix the issue. For re-prompting behavior at Stop time, use a `type: command` handler with exit code 2 instead.
+- Cost tokens every time they fire. A prompt handler on `PreToolUse` with an `Edit|Write` matcher runs on every single file edit. If Claude edits 30 files, that's 30 Haiku calls.
 
 When you need to compare against other files or do multi-step verification, you need an agent handler.
 
@@ -549,7 +551,7 @@ The best pattern: use command handlers on `PostToolUse` for per-edit enforcement
 
 - Expensive. Every tool call the agent makes costs tokens.
 - Slow. A 30-second agent handler on `PostToolUse` would make Claude feel sluggish. Use them on `Stop` or `PreToolUse` where a pause is acceptable.
-- Can create loops. If a `Stop` agent handler returns `{"ok": false}`, Claude keeps working. If the agent handler keeps finding issues, the session can loop. Always check `stop_hook_active` in Stop hooks or set a reasonable `timeout`.
+- Can create loops. If a `Stop` handler blocks the stop, Claude keeps working. If the handler keeps finding issues, the session can loop. Always check `stop_hook_active` in Stop hooks or set a reasonable `timeout`. Note: for Stop hooks, using a `type: command` handler with exit code 2 gives more predictable re-prompting behavior than prompt or agent handlers.
 
 ---
 
@@ -689,7 +691,7 @@ The SKILL.md instruction for a script looks like this:
 Run the full design audit on all files you modified:
 
 \`\`\`bash
-python ${CLAUDE_SKILL_DIR}/scripts/audit-page.py <file1> <file2> ...
+python $CLAUDE_PROJECT_DIR/.claude/skills/design-enforcer/scripts/audit-page.py <file1> <file2> ...
 \`\`\`
 
 Fix all violations before presenting the result to the user.

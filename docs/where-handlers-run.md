@@ -66,7 +66,7 @@ hooks:
     - matcher: "Edit|Write"
       hooks:
         - type: command
-          command: "python ${CLAUDE_SKILL_DIR}/scripts/validate-composition.py"
+          command: "python $CLAUDE_PROJECT_DIR/.claude/skills/design-to-code/scripts/validate-composition.py"
   Stop:
     - hooks:
         - type: agent
@@ -94,7 +94,7 @@ Good candidates for skill-scoped:
 - Layout pattern matching (only valuable when building pages/views)
 - Component creation gatekeeping (only when the skill is about building UI)
 
-The `${CLAUDE_SKILL_DIR}` variable is critical here. It resolves to the directory containing the skill's `SKILL.md`, so the skill can reference its own scripts regardless of where it's installed. This makes skills **portable** — the hooks, the scripts, and the instructions all travel together as a unit.
+**Important:** `$CLAUDE_PROJECT_DIR` is the only path variable available in hook commands — it points to the project root. There is no `$CLAUDE_SKILL_DIR` variable for shell commands (this is a common gotcha). Hook commands must use the full path: `$CLAUDE_PROJECT_DIR/.claude/skills/<skill-name>/scripts/...`. Note that `${CLAUDE_SKILL_DIR}` *does* work inside SKILL.md body text where Claude interprets it, but not in the shell commands that hooks execute.
 
 #### When Skills Activate
 
@@ -127,7 +127,7 @@ These aren't hooks at all. They're scripts that live in a skill's `scripts/` dir
 Before presenting any completed UI work to the user, run the full design audit:
 
 ```bash
-python ${CLAUDE_SKILL_DIR}/scripts/full-audit.py --files <all modified files>
+python $CLAUDE_PROJECT_DIR/.claude/skills/design-to-code/scripts/full-audit.py --files <all modified files>
 ```
 
 Fix all violations before responding. If violations remain after three attempts,

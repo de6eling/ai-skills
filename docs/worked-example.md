@@ -130,14 +130,9 @@ hooks:
             Focus on composition patterns, not tokens or imports (those are
             handled by per-edit validators).
           timeout: 120
-        - type: prompt
-          prompt: >
-            Review the session's last message. Check if the implementation
-            described uses appropriate semantic HTML structure — headings
-            follow h1>h2>h3 order, lists are used for list content, nav is
-            used for navigation, main/section/article for content areas.
-            If semantic structure is poor, respond:
-            {"ok": false, "reason": "[what to fix]"}
+        - type: command
+          command: "python $CLAUDE_PROJECT_DIR/.claude/skills/design-system-enforcer/scripts/validate-stop.py"
+          statusMessage: "Running final design system validation..."
 ---
 
 # Design System Enforcer
@@ -582,7 +577,7 @@ Input, Select, Switch, Checkbox, Label, Dialog, DataTable, Badge, Tabs...
 
 **Claude finishes**: "I've built the preferences page with three sections..."
 
-**Skill-scoped Stop hooks fire (2 in parallel):**
+**Skill-scoped Stop hooks fire (2 hooks):**
 
 - **Agent handler** reads PreferencesPage.tsx, finds DashboardPage.tsx and ProfilePage.tsx for comparison.
   - Dashboard uses `grid-cols-2 gap-4` for cards
@@ -590,9 +585,8 @@ Input, Select, Switch, Checkbox, Label, Dialog, DataTable, Badge, Tabs...
   - Preferences uses `space-y-6` — matches Profile's form pattern. Consistent.
   - Returns: `{"ok": true}`
 
-- **Prompt handler** checks semantic HTML structure.
-  - Headings follow h1 > h2 order, form elements have labels, sections use semantic grouping.
-  - Returns: `{"ok": true}`
+- **Command handler** (`validate-stop.py`) scans all git-modified UI files for token and import violations.
+  - All files pass. Exits with code 0.
 
 **Claude's response is delivered to the user.** The page uses existing components correctly, follows established layout patterns, uses design tokens throughout, and is semantically well-structured.
 

@@ -51,18 +51,20 @@ Claude finishes and is about to respond to the user
   ↓
 Stop hook fires → handler evaluates the completed work
   ↓
-Handler finds issues → returns {"ok": false, "reason": "what to fix"}
+Handler finds issues → command handler exits with code 2 + stderr feedback
   ↓
-Claude receives the reason as its next instruction → goes back to work
+Claude receives the feedback as its next instruction → goes back to work
   ↓
 Claude finishes again → Stop hook fires again
   ↓
-Handler finds no issues → returns {"ok": true}
+Handler finds no issues → exits with code 0
   ↓
 Claude's response is delivered to the user
 ```
 
-The Stop hook quality gate is powerful because it evaluates the *entire task*, not just one file. An agent handler on the Stop hook can read multiple files, compare patterns across the codebase, and make judgment calls about overall consistency.
+**Important:** For reliable re-prompting at Stop time, use a `type: command` handler (exit 2 to block, exit 0 to allow). Stop hooks with `type: prompt` use a different format (`{"decision": "block", "reason": "..."}` or `{}` to allow) and show an error message rather than re-prompting Claude — not ideal for iterative fix loops.
+
+The Stop hook quality gate is powerful because it evaluates the *entire task*, not just one file. A command handler on the Stop hook can scan all git-modified files and catch issues that slipped through per-edit checks.
 
 **This loop has an infinite loop risk.** If the handler keeps finding issues, Claude keeps working, which triggers more Stop hooks. The `stop_hook_active` field exists specifically for this — when it's `true`, Claude is already responding to a previous Stop hook rejection. Your handler must check this and decide whether to allow Claude to stop.
 
@@ -243,18 +245,20 @@ When feedback includes the line number, the offending value, and the replacement
 
 ### Feedback for Prompt and Agent Handlers
 
-Prompt and agent handlers return `{"ok": false, "reason": "..."}`. The `reason` field serves the same purpose as stderr in command handlers — it's the message Claude receives as its next instruction.
+For PreToolUse prompt/agent handlers, the response format is `{"ok": false, "reason": "..."}`. The `reason` field serves the same purpose as stderr in command handlers — it's the message Claude receives as its next instruction.
 
-The same principles apply. The `reason` should be specific, actionable, and comprehensive. The difference is that prompt/agent handlers can express more nuanced feedback:
+**For Stop hooks, the format is different:** prompt handlers use `{"decision": "block", "reason": "..."}` or `{}` to allow. However, we found in practice that Stop prompt handlers show an error rather than re-prompting Claude. For reliable iterative fix loops at Stop time, use a command handler (exit 2) instead.
 
-```json
-{
-  "ok": false,
-  "reason": "The settings page layout is inconsistent with the dashboard. The dashboard uses a 2-column grid for card groups, but the settings page uses a single column with full-width cards. For visual consistency, refactor the settings page to use the same 2-column grid layout established in src/pages/Dashboard.tsx (lines 45-60). The Card components are used correctly but their container layout doesn't match the established pattern."
-}
+The same principles apply regardless of handler type. Feedback should be specific, actionable, and comprehensive:
+
+```
+The settings page layout is inconsistent with the dashboard. The dashboard
+uses a 2-column grid for card groups, but the settings page uses a single
+column with full-width cards. Refactor the settings page to use the same
+2-column grid layout established in src/pages/Dashboard.tsx (lines 45-60).
 ```
 
-This is feedback a command handler couldn't produce — it requires comparing two files and making a judgment about layout consistency. But the same principles apply: be specific about what's wrong, where, and how to fix it.
+This kind of nuanced feedback — comparing two files and judging layout consistency — is where agent handlers shine. But the same principles apply: be specific about what's wrong, where, and how to fix it.
 
 ## The Complete Loop Architecture
 

@@ -337,17 +337,10 @@ Exit code 1 (and any other non-zero, non-2 code) means "the hook script itself e
 
 ### The Structured JSON Alternative
 
-For Stop hooks and some advanced PreToolUse scenarios, you can return structured JSON on stdout instead of using stderr + exit 2:
+For PreToolUse scenarios, you can return structured JSON on stdout instead of using stderr + exit 2:
 
 ```python
 import json
-
-# For Stop hooks — sends Claude back to work
-print(json.dumps({
-    "ok": False,
-    "reason": "Design token violations remain in src/Card.tsx"
-}))
-sys.exit(0)  # Note: exit 0, not exit 2. The JSON controls the decision.
 
 # For PreToolUse hooks — deny with feedback
 print(json.dumps({
@@ -361,6 +354,8 @@ sys.exit(0)
 ```
 
 When using JSON output, always exit 0. The JSON body controls the decision. Don't mix exit 2 with JSON — Claude Code ignores JSON when the exit code is 2.
+
+**For Stop hooks, use exit code 2 + stderr instead of JSON.** We found in practice that Stop hooks with `type: command` and exit 2 reliably re-prompt Claude to fix issues, while JSON-based approaches (including prompt handlers) show error messages instead of re-prompting. The pattern: exit 0 to allow stopping, exit 2 with stderr describing the violations to send Claude back to work.
 
 ### Formatting the Feedback Message
 
@@ -491,7 +486,7 @@ def main():
 
 **Reporting one violation at a time.** If a file has five violations and you only report the first one, Claude fixes it, the handler fires again, reports the second one, Claude fixes it, and so on for five cycles. Report all violations at once.
 
-**Hardcoding project-specific paths.** Use `${CLAUDE_SKILL_DIR}` for skill-relative paths and `${CLAUDE_PROJECT_DIR}` for project-relative paths. Don't use `/Users/dan/myproject/src/components`.
+**Hardcoding project-specific paths.** Use `$CLAUDE_PROJECT_DIR` for project-relative paths in hook commands. Don't use `/Users/dan/myproject/src/components`. Note: there is no `$CLAUDE_SKILL_DIR` variable available to hook shell commands — this is a common gotcha. For skill-relative paths, use `$CLAUDE_PROJECT_DIR/.claude/skills/<skill-name>/...`. Inside Python scripts, you can use `Path(__file__).parent.parent` to find the skill's root directory.
 
 **Checking files the validator shouldn't touch.** Test files, storybook files, the design system source, config files, markdown — make sure your relevance check excludes everything that isn't a consumer of the design system.
 
