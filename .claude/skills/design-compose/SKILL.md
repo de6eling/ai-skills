@@ -42,12 +42,19 @@ Compose existing components — don't create new ones.
 
 ## Before You Start
 
-Check if `${CLAUDE_SKILL_DIR}/config/paths.json` exists. If not, tell the
-user to run `/design-setup` first and stop.
+Look for `config/paths.json` inside the skill's directory
+(`.claude/skills/design-compose/config/paths.json`). If not found,
+tell the user to run `/design-setup` first and stop.
 
 If it exists, read `paths.json`, `component-map.json`, and
-`composition-rules.json` to understand the project's components, tokens,
-and compound patterns.
+`composition-rules.json` from that config directory to understand the
+project's components, tokens, and compound patterns.
+
+Note: `$CLAUDE_PROJECT_DIR` is the only path variable available in
+hook commands. It points to the project root. There is no
+`$CLAUDE_SKILL_DIR` variable — that was a common gotcha we discovered.
+Hook commands must use the full path:
+`$CLAUDE_PROJECT_DIR/.claude/skills/design-compose/...`
 
 ## Rules
 

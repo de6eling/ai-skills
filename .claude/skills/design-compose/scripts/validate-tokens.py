@@ -17,10 +17,12 @@ WHEN DOES IT RUN:
   to fix it before moving on.
 
 WHAT HAPPENS WHEN IT FINDS SOMETHING:
-  - If the file is clean: nothing visible, the AI keeps going
+  - If the file is clean: the result is recorded in the log file
+    (see below) and the AI reports it in its response. Nothing
+    else visible in the chat — clean passes are quiet by design.
   - If there's a problem: the AI is told exactly which line has the
     issue and how to fix it (e.g. "Line 42: hardcoded hex color —
-    use a design token instead")
+    use a design token instead"). This DOES show in the chat.
 
 WHERE TO SEE THE RESULTS:
   Open .claude/logs/validation.log — every time this script runs, it

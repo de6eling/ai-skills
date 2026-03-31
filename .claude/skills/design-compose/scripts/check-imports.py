@@ -26,13 +26,19 @@ WHERE TO SEE THE RESULTS:
     2026-03-31T04:27:20 [check-imports] page.tsx: FAIL (1 violations)
 
 HOW IT KNOWS WHICH COMPONENTS EXIST:
-  It reads config/component-map.json — this is the catalog of all your
-  design system components. Each entry maps a raw HTML element to its
-  replacement. For example:
-    "<button>" → "Use Button from '@/components/ui/button'"
+  It reads config/component-map.json — the catalog of all your design
+  system components. Each entry has a component name and a description
+  of how to use it. For example:
+    "button" → "Use Button from '@/components/ui/button'. Variants: ..."
 
-  This catalog is created by /design-setup and grows as you add
-  new components during compose sessions.
+  If a catalog entry starts with "<" (like "<button>"), the script will
+  look for that raw HTML tag in your code. With the default catalog
+  format (plain names like "button"), this script serves as a
+  placeholder — ready to enforce raw-HTML-to-component rules if you
+  add entries like "<button>" to your catalog.
+
+  The catalog is created by /design-setup and grows as you add new
+  components during compose sessions.
 """
 
 import json
